@@ -1,11 +1,13 @@
 import sqlite3
 
 class Camera:
-    def __init__(self, mac, name, last_frame, key):
+    def __init__(self, mac, name, last_frame, key, red_zone, ip):
         self.mac = mac
         self.name = name
         self.last_frame = last_frame
         self.key = key
+        self.red_zone = red_zone
+        self.ip = ip
 
     def __repr__(self):
         return f"Camera(mac={self.mac}, name={self.name}, last_frame={self.last_frame}, key={self.key})"
@@ -23,16 +25,17 @@ class CameraDatabase:
                 name TEXT,
                 last_frame TEXT,
                 key TEXT,
-                red_zone TEXT
+                red_zone TEXT,
+                last_known_ip TEXT
             )
         ''')
         self.conn.commit()
 
-    def add_camera(self, mac, name, key):
+    def add_camera(self, mac, name, key, ip):
         self.cursor.execute('''
-            INSERT OR REPLACE INTO cameras (mac, name, last_frame, key)
+            INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone, last_known_ip)
             VALUES (?, ?, ?, ?)
-        ''', (mac, name, None, key))
+        ''', (mac, name, None, key, None, ip))
         self.conn.commit()
 
     def get_camera(self, mac):

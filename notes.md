@@ -1,5 +1,7 @@
 -   ARP spoofing protection: Have some kind of way to identify camera - maybe just store mac locally (bad on reconnection, might get diff IP)
 
+- If connecting to camera doesnt work, find what mac is what ip again (local ip mightve changed)
+
 ## Camera discovery
 
 1. Client clicks discover cameras
