@@ -233,10 +233,11 @@ class SocketServer:
             self.logger.error(f"No data received from {client.addr}")
             return None
 
-        if len(data) != len(pattern):
+        if len(data) != len(pattern) and not constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
             return False
 
         for i in range(len(pattern)):
+            if pattern[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE: break
             if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE.value and data[i] != pattern[i]:
                 return False
 
@@ -278,11 +279,12 @@ class SocketServer:
 
     def match_message(self, data: list[bytes], client: SocketClient) -> callable:
         for pattern, callback in self.message_callbacks.items():
-            if len(data) != len(pattern):
-                continue
+            if len(data) != len(pattern) and not constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
+                return False
+            
             for i in range(len(pattern)):
-                if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE and data[i] != pattern[i]:
-                    break
+                if pattern[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE: break
+                if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE and data[i] != pattern[i]: break
             else:
                 self.logger.debug(f"Matching message found for {client.addr}: {pattern}")
                 return callback

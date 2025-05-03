@@ -1,3 +1,5 @@
+from ..socket_server_lib.constants import Options
+
 class Constants:
     DISCOVER_CAMERA_QUERY_PORT = 5000
     CAMERA_HANDLER_PORT = 5001

@@ -23,6 +23,7 @@ class Options(enum.Enum):
     MESSAGE_SIZE_BYTE_LENGTH = 4
     MESSAGE_SEPARATOR = b"\0"
     ANY_VALUE_TEMPLATE = b"\0"
+    ANY_VALUE_ANY_LENGTH_TEMPLATE = b"\1"
 
 # \0 in a field means any value
 class SocketMessages:
