@@ -1,93 +1,141 @@
 from socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
-from camera_server.constants import Constants
+from camera_server.constants import Constants, Messages
 import time
 import socket
 from camera_server.database_manager import CameraDatabase
+import threading
+
+# TODO: How could we make a re-pair? we need to battle arp spoofing too
+
+class CameraServerCallbacks:
+    def on_camera_discovered(self, camera_addr, camera_mac):
+        raise NotImplementedError("on_camera_discovered method not implemented")
+
+    def on_camera_paired(self, camera_addr, camera_mac):
+        raise NotImplementedError("on_camera_paired method not implemented")
+
+    def on_camera_pairing_failed(self, camera_addr, camera_mac, reason):
+        raise NotImplementedError("on_camera_pairing_failed method not implemented")
+    
+def __does_match_pattern(data, pattern):
+    if len(data) != len(pattern):
+        return False
+    
+    for i in range(len(data)):
+        if data[i] != pattern[i] and pattern[i] != Constants.TEMPLATE_ANY_VALUE:
+            return False
+        
+    return True
+
+def __handle_template(template, *args):
+    if template.count(Constants.TEMPLATE_ANY_VALUE) != len(args):
+        raise ValueError("Number of arguments does not match the number of template placeholders")
+    
+    new_template = []
+    placeholder_ind = 0
+    for i in range(len(template)):
+        if template[i] == Constants.TEMPLATE_ANY_VALUE:
+            new_template.append(args[placeholder_ind])
+            placeholder_ind += 1
+        else:
+            new_template.append(template[i])
+    
+    return new_template
 
 class CameraServer:
-    def __init__(self, logger=DefaultLogger()):
-        self.soc_server = SocketServer(
+    def __init__(self, callbacks: CameraServerCallbacks, logger=DefaultLogger()):
+        self.logger = logger
+        
+        # This server listens for camera pairing mode broadcasts
+        self.camera_discover_server = SocketServer(
             host="0.0.0.0",
-            port=None,
+            port=Constants.DISCOVER_CAMERA_QUERY_PORT,
+            protocol=constants.ServerProtocol.UDP,
+            logger=logger,
+        )
+        self.camera_discover_server.start(no_loop=True)
+
+        # This server registers new cameras and handles camera data
+        self.camera_server = SocketServer(
+            host="0.0.0.0",
+            port=Constants.CAMERA_HANDLER_PORT,
+            protocol=constants.ServerProtocol.UDP,
             logger=logger,
         )
 
-        self.free_talker = SocketServer(
-            host="0.0.0.0",
-            port=None,
-            protocol=constants.ServerProtocol.UDP,
-            logger=0,
-            reserve_port=False,
-        )
-        self.listener.start(no_loop=True)
+        self.callbacks = callbacks
+        self.discovering_cameras = True
+        self.cameras_awaiting_pairing = set()
 
-        self.logger = logger
         self.db = CameraDatabase()
+
+        self.camera_server.add_custom_message_callback(
+            Messages.CAMERA_PAIR_REQUEST,
+            self.__handle_pair_request,
+        )
+
+    def __validate_camera_mac(self, camera_mac):
+        return camera_mac.startswith(Constants.CAMERA_MAC_PREFIX)
+
+    def __build_camera_client(self, camera_addr):
+        return SocketClient(
+            addr=camera_addr,
+            socket=None
+        )
+
+    def discover_cameras(self):
+        self.camera_discover_server.server_socket.settimeout(1)
+        while self.discovering_cameras:
+            try:
+                addr, data = self.camera_discover_server.server_socket.recvfrom(1024)
+            except socket.timeout:
+                continue
+            if __does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY):
+                fields = data.split(Constants.SEPARATOR)
+                if len(fields) != 2:
+                    self.logger.error(f"Invalid camera pairing message: {data}")
+                    continue
+
+                camera_mac = fields[1]
+                if not self.__validate_camera_mac(camera_mac):
+                    self.logger.error(f"Invalid camera MAC address: {camera_mac}")
+                    continue
+
+                self.logger.info(f"Camera pairing request from {addr} with MAC {camera_mac}")
+                self.new_camera_callback(addr, camera_mac)
     
-    def scan_for_cameras(self, timeout=5):
-        self.logger.info("Scanning for cameras...")
-        self.free_talker.broadcast(
-            data=b"CAMSCAN-HSEC",
-            target_port=Constants.DISCOVER_CAMERA_QUERY_PORT,
+    def pair_camera(self, camera_addr, camera_code):
+        self.camera_discover_server.send_data(
+            self.__build_camera_client(camera_addr),
+            __handle_template(Messages.CAMERA_PAIRING_RESPONSE, Constants.CAMERA_HANDLER_PORT, camera_code),
         )
+        self.cameras_awaiting_pairing.add(camera_addr[0])
 
-        camera_addrs = []
-
-        start_time = time.time()
-        self.free_talker.server_socket.settimeout(timeout)
-        try:
-            while time.time() - start_time < timeout:
-                data, addr = self.free_talker.server_socket.recvfrom(1024)
-                if data == b"CAMACK-HSEC":
-                    self.logger.info(f"Camera found at {addr}")
-                    camera_addrs.append(addr)
-        except socket.timeout:
-            self.logger.info("Camera scan timed out.")
+    def __handle_pair_request(self, camera_cli, fields):
+        if camera_cli.addr[0] not in self.cameras_awaiting_pairing:
+            self.logger.error(f"Camera {camera_cli.addr} is not awaiting pairing")
+            return
         
-        self.logger.info(f"Camera scan complete. Found {len(camera_addrs)} cameras.")
-        return camera_addrs
-    
-    def attempt_camera_link(self, camera_addr, camera_key, camera_name):
-        """
-        server ---> camera: CAMLINK-HSEC
-        camera ---> server: CAMACK-HSEC
-        RSA key exchange
-        server ---> camera: CAMKEY-HSEC <camera key> 
-        camera ---> server: CAMOK-HSEC <camera mac>
-        """
+        def __handle_pair(camera_mac):
+            camera_client = self.__build_camera_client(camera_cli.addr)
+
+            success = self.camera_server.exchange_aes_key_with_rsa(camera_client)
+            if not success:
+                self.logger.error("Failed to exchange keys with camera.")
+                self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
+                self.callbacks.on_camera_pairing_failed(camera_cli.addr, camera_mac, "Failed to exchange keys")
+                return
+            
+            camera_name = f"HSEC {''.join(camera_mac.split(':')[-3:])}"
+            self.db.add_camera(camera_mac, camera_name, camera_client.random)
+            self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
+            self.callbacks.on_camera_paired(camera_cli.addr, camera_mac)
+
+        thread = threading.Thread(target=__handle_pair, args=(fields[1],))
+        thread.daemon = True
+        thread.start()
         
-        linker = SocketServer(
-            host="0.0.0.0",
-            port=Constants.CAMERA_LINK_PORT,
-        )
-        linker.start(no_loop=True)
 
-        camera_cli = SocketClient(socket=None, addr=camera_addr)
 
-        self.logger.info(f"Attempting to link with camera at {camera_addr}...")
-        self.free_talker.send_data(
-            camera_cli,
-            data=[b"CAMLINK-HSEC", Constants.CAMERA_LINK_PORT],
-        )
 
-        self.logger.info(f"Sent CAMLINK-HSEC to {camera_addr}. Waiting for CAMACK-HSEC...")
-        linker.receive_data_with_pattern(camera_cli, [b"CAMACK-HSEC"])
-        success = linker.exchange_aes_key_with_rsa(camera_cli)
-        if not success:
-            self.logger.error("Failed to exchange keys with camera.")
-            return False
-        
-        self.logger.info("Key exchange successful. Sending CAMKEY-HSEC...")
-        linker.send_data(
-            camera_cli,
-            [b"CAMKEY-HSEC", camera_key],
-        )
 
-        data = linker.receive_data(camera_cli, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES)
-        if data[0] == b"CAMOK-HSEC":
-            self.logger.info("Camera linked successfully.")
-            self.db.add_camera(data[1], camera_name, camera_key)
-            return True
-        else:
-            self.logger.error("Failed to link with camera.")
-            return False
