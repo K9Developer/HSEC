@@ -1,12 +1,15 @@
 import sqlite3
 
 class Camera:
-    def __init__(self, mac, name, last_frame, key, red_zone):
+    def __init__(self, mac, name, last_frame, key, red_zone, last_known_ip):
         self.mac = mac
         self.name = name
         self.last_frame = last_frame
         self.key = key
         self.red_zone = red_zone
+        self.last_known_ip = last_known_ip
+
+        self.client = None
 
     def __repr__(self):
         return f"Camera(mac={self.mac}, name={self.name}, last_frame={self.last_frame}, key={self.key})"
@@ -25,15 +28,16 @@ class CameraDatabase:
                 last_frame TEXT,
                 key TEXT,
                 red_zone TEXT,
+                last_known_ip TEXT,
             )
         ''')
         self.conn.commit()
 
-    def add_camera(self, mac, name, key):
+    def add_camera(self, mac, name, key, last_known_ip):
         self.cursor.execute('''
-            INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone)
-            VALUES (?, ?, ?, ?)
-        ''', (mac, name, None, key, None))
+            INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone, last_known_ip)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (mac, name, None, key, None, last_known_ip))
         self.conn.commit()
 
     def get_camera(self, mac):
@@ -59,6 +63,12 @@ class CameraDatabase:
         self.cursor.execute('''
             UPDATE cameras SET last_frame = ? WHERE mac = ?
         ''', (last_frame, mac))
+        self.conn.commit()
+
+    def update_camera_ip(self, mac, last_known_ip):
+        self.cursor.execute('''
+            UPDATE cameras SET last_known_ip = ? WHERE mac = ?
+        ''', (last_known_ip, mac))
         self.conn.commit()
 
     def set_red_zone(self, mac, red_zone):
