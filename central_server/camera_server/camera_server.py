@@ -3,6 +3,8 @@ from camera_server.constants import Constants, Messages
 import socket
 from camera_server.database_manager import CameraDatabase, Camera
 import threading
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Cipher import AES
 
 # TODO: How could we make a re-pair? we need to battle arp spoofing too
 
@@ -84,7 +86,7 @@ class CameraServer:
         )
         
         self.camera_server.add_custom_message_callback(
-            Messages.CAMERA_PAIR_REQUEST,
+            Messages.CAMERA_REPAIR_REQUEST,
             self.__handle_repair_request,
         )
 
@@ -191,16 +193,23 @@ class CameraServer:
             camera.client.transfer_options = constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES
             camera.client.random = self.db.get_camera(camera_mac).key
 
-            self.camera_server.send_data(camera.client, __handle_template(Messages.CAMERA_REPAIR_CONFIRM))
+            # TODO: susceptible to replay attacks
+            encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair"))
+            self.camera_server.send_data(camera.client, __handle_template(Messages.CAMERA_REPAIR_CONFIRM, encrypted_confirm))
             data = self.camera_server.receive_data_with_pattern(camera.client, Messages.CAMERA_REPAIR_CONFIRM_ACK, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES)
-            if data:
-                self.logger.info(f"Camera {camera_mac} repaired successfully")
-                self.db.update_camera_ip(camera_mac, camera_cli.addr[0])
-                self.connected_cameras[camera_mac] = camera
-            else:
-                self.logger.error(f"Failed to repair camera {camera_mac}")
+            if data is None:
+                self.logger.error(f"Failed to receive repair confirmation from camera {camera_mac}")
                 return
-
+            
+            decrypted_data = unpad(camera.client.get_aes().decrypt(data[1]), AES.block_size)
+            if len(data) != 2 or decrypted_data != b"confirm-pair-ack":
+                self.logger.error(f"Invalid repair confirmation message received from camera {camera_mac}")
+                return
+                
+            self.logger.info(f"Camera {camera_mac} repaired successfully")
+            self.db.update_camera_ip(camera_mac, camera_cli.addr[0])
+            self.connected_cameras[camera_mac] = camera
+           
         thread = threading.Thread(target=__handle_repair, args=(fields[1],))
         thread.daemon = True
         thread.start()
@@ -217,7 +226,7 @@ class CameraServer:
         def __handle_pair(camera_mac):
             camera_client = self.__build_camera_client(camera_cli.addr)
 
-            success = self.camera_server.exchange_aes_key_with_rsa(camera_client)
+            success = self.camera_server.exchange_aes_key_with_ecdh(camera_client)
             if not success:
                 self.logger.error("Failed to exchange keys with camera.")
                 self.cameras_awaiting_pairing.remove(camera_cli.addr[0])

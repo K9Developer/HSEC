@@ -17,7 +17,6 @@ class SocketServerCallbacks(enum.Enum):
 class DataTransferOptions(enum.Flag):
     WITH_SIZE = enum.auto()
     ENCRYPT_AES = enum.auto()
-    IS_PATTERN = enum.auto() # behind the scenes only
 
 class Options(enum.Enum):
     MESSAGE_SIZE_BYTE_LENGTH = 4
@@ -28,7 +27,7 @@ class Options(enum.Enum):
 # \0 in a field means any value
 class SocketMessages:
     class AesKeyExchange:
-        SERVER_HELLO = [b"exch", b"rsa", b"aes"]
-        CLIENT_HELLO = [b"exch", b"rsa",  b"aes", Options.ANY_VALUE_TEMPLATE]
-        SERVER_KEY_EXCHANGE = [b"exch", b"rsa", b"aes", Options.ANY_VALUE_TEMPLATE]
+        SERVER_HELLO = [b"exch", b"ecdh", b"aes", Options.ANY_VALUE_TEMPLATE]
+        CLIENT_HELLO = [b"exch", b"ecdh",  b"aes", Options.ANY_VALUE_TEMPLATE]
         CLIENT_KEY_CONFIRM = [Options.ANY_VALUE_TEMPLATE]
+        SERVER_KEY_CONFIRM = [Options.ANY_VALUE_TEMPLATE]

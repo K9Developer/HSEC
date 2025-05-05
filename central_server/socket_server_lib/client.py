@@ -1,16 +1,20 @@
 import os
 import socket
 from socket_server_lib import constants
+from Crypto.Cipher import AES
 
 class SocketClient:
     def __init__(self, socket: socket.socket, addr: tuple, transfer_options: constants.DataTransferOptions = None, client_thread=None, random=None):
         self.socket = socket
         self.addr = addr
         self.is_connected = True
-        self.random = random if random else os.urandom(16)
+        self.random = random if random else os.urandom(32)
         self.transfer_options = transfer_options if transfer_options else constants.DataTransferOptions.WITH_SIZE
         self.client_thread = client_thread
         self.auto_recv = True
-        assert len(self.random) == 16, "Random value must be 16 bytes long"
+        self.aes_obj = None
+        assert len(self.random) == 32, "Random value must be 32 bytes long"
         assert isinstance(self.random, bytes), "Random value must be of type bytes"
     
+    def get_aes(self):
+        return self.aes_obj if self.aes_obj else AES.new(self.random, AES.MODE_CBC, self.random[:AES.block_size])

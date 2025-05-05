@@ -72,7 +72,7 @@ class CameraServer:
 
         self.logger.info(f"Sent CAMLINK-HSEC to {camera_addr}. Waiting for CAMACK-HSEC...")
         linker.receive_data_with_pattern(camera_cli, [b"CAMACK-HSEC"])
-        success = linker.exchange_aes_key_with_rsa(camera_cli)
+        success = linker.exchange_aes_key_with_ecdh(camera_cli)
         if not success:
             self.logger.error("Failed to exchange keys with camera.")
             return False

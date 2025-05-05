@@ -3,12 +3,11 @@ from socket_server_lib import constants
 import socket
 import threading
 from socket_server_lib.client import SocketClient
-
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
 
 class EmptyLogger:
     def info(self, message: str): pass
@@ -32,6 +31,28 @@ class DefaultLogger(EmptyLogger):
     def warning(self, message: str):
         print(f"WARNING: {message}")
         pass
+
+def __handle_template(template: list, *args) -> list:
+    if not isinstance(template, list):
+        raise TypeError("Template must be a list")
+    
+    if len(template) != len(args):
+        raise ValueError("Template and args length mismatch")
+    
+    new_template = []
+    arg_index = 0
+    for i in range(len(template)):
+        if template[i] == constants.Options.ANY_VALUE_TEMPLATE.value:
+            new_template.append(args[arg_index])
+            arg_index += 1
+        elif template[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
+            new_template.extend(args[arg_index:])
+            break
+        else:
+            new_template.append(template[i])
+
+    return new_template
+        
 
 class SocketServer:
     def __init__(self, host: str = '127.0.0.1', port: int = 8080, accept_buffer: int =1000, protocol: constants.ServerProtocol = constants.ServerProtocol.TCP, logger = None, reserve_port=True):
@@ -136,13 +157,12 @@ class SocketServer:
         except Exception as e:
             self.logger.error(f"Error sending raw bytes to {client.addr}: {e}")
     
-    def __data_to_bytes(self, data, strip_msg_sep_fields=False) -> bytes:
+    def __data_to_bytes(self, data) -> bytes:
         def encoding(d):
-            if strip_msg_sep_fields and d == constants.Options.ANY_VALUE_TEMPLATE.value: return None
             if isinstance(d, str): return d.encode('utf-8')
             if isinstance(d, bytes): return d
             if isinstance(d, int): return str(d).encode('utf-8')
-            if isinstance(d, list): return constants.Options.MESSAGE_SEPARATOR.value.join([encoding(item) for item in d if item != constants.Options.ANY_VALUE_TEMPLATE.value])
+            if isinstance(d, list): return constants.Options.MESSAGE_SEPARATOR.value.join([encoding(item) for item in d])
             raise TypeError(f"Unsupported data type: {type(d)}")
         
         return encoding(data)
@@ -169,12 +189,11 @@ class SocketServer:
         self.logger.debug(f"Broadcasted data to port {target_port}")
 
     def send_data(self, client: SocketClient, data, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE):
-        data = self.__data_to_bytes(data, constants.DataTransferOptions.IS_PATTERN in options)
+        data = self.__data_to_bytes(data)
         modified_data = data
         if constants.DataTransferOptions.ENCRYPT_AES in options:
-            cipher = AES.new(client.random, AES.MODE_CBC)
-            iv = cipher.iv
-            modified_data = iv + cipher.encrypt(pad(data, AES.block_size))
+            cipher = client.get_aes()
+            modified_data = cipher.encrypt(pad(data, AES.block_size))
             self.logger.debug(f"Data encrypted with AES for {client.addr}")
         
         if constants.DataTransferOptions.WITH_SIZE in options:
@@ -218,7 +237,7 @@ class SocketServer:
             message = self.__receive_raw_bytes(client, optional_buffer_size)
 
         if constants.DataTransferOptions.ENCRYPT_AES in options:
-            cipher = AES.new(client.random, AES.MODE_CBC, client.random[:AES.block_size])
+            cipher = client.get_aes()
             message = unpad(cipher.decrypt(message), AES.block_size)
             self.logger.debug(f"Data decrypted with AES for {client.addr}")
         
@@ -243,36 +262,49 @@ class SocketServer:
 
         return data
 
-    def exchange_aes_key_with_rsa(self, client: SocketClient):
+    def exchange_aes_key_with_ecdh(self, client: SocketClient):
         """
-        PKCS1_OAEP is used for RSA encryption/decryption
+        Elliptic Curve Diffie-Hellman key exchange
 
-        server -> client: exch,rsa
-        client -> server: exch,rsa,client_rsa_pubkey
-        server -> client: client_rsa_pubkey&data
-        client -> server: confirm&data
+        server -> client: exch, ecdh, aes, server_pubkey
+        client -> server: exch, ecdh, aes, client_pubkey
+        client -> server: confirm & shared_secret
         """
+
         client.auto_recv = False
-        self.send_data(client, constants.SocketMessages.AesKeyExchange.SERVER_HELLO, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.IS_PATTERN)
-        self.logger.debug(f"Sent server hello to {client.addr}")
-        client_hello = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_HELLO, constants.DataTransferOptions.WITH_SIZE)
-        if not client_hello:
-            self.logger.error(f"Client hello not received from {client.addr}")
+        server_privkey = ec.generate_private_key(ec.SECP256R1())
+        server_pubkey = server_privkey.public_key()
+        server_pubkey_bytes = server_pubkey.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+
+        self.logger.debug(f"Server ECDH public key generated for {client.addr}")
+        self.send_data(client, __handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes), constants.DataTransferOptions.WITH_SIZE)
+        self.logger.debug(f"Sent server ECDH public key to {client.addr}")
+        client_pubkey = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_HELLO, constants.DataTransferOptions.WITH_SIZE)
+        if not client_pubkey:
+            self.logger.error(f"Client ECDH public key not received from {client.addr}")
             return False
         
-        client_rsa_pubkey = client_hello[3]
-        client_rsa_pubkey = PKCS1_OAEP.new(RSA.import_key(client_rsa_pubkey))
-        self.logger.debug(f"Received client RSA public key from {client.addr}")
-        encrypted_random = client_rsa_pubkey.encrypt(client.random)
-        self.logger.debug(f"Encrypted random value with client RSA public key for {client.addr}")
-        self.send_data(client, encrypted_random, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.IS_PATTERN)
-        self.logger.debug(f"Sent encrypted random value to {client.addr}")
-        client_confirm = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_KEY_CONFIRM, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.IS_PATTERN | constants.DataTransferOptions.ENCRYPT_AES)
-        if not client_confirm or client_confirm[0] != b"confirm":
+        important_client_pubkey = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), client_pubkey[3])
+        shared_secret = server_privkey.exchange(ec.ECDH(), important_client_pubkey)
+        self.logger.debug(f"Shared secret computed for {client.addr}")
+
+        confirm_message = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_KEY_CONFIRM, constants.DataTransferOptions.WITH_SIZE)
+        if not confirm_message:
             self.logger.error(f"Client confirmation not received from {client.addr}")
             return False
         
-        self.logger.debug(f"Client confirmation received from {client.addr}")
+        client.random = shared_secret
+        aes = client.get_aes()
+
+        decrypted_message = unpad(aes.decrypt(confirm_message[0]), AES.block_size)
+        if decrypted_message != b"confirm":
+            self.logger.error(f"Client confirmation message not received from {client.addr}")
+            return False
+        
+        self.logger.debug(f"Client confirmation message received from {client.addr}")
         client.transfer_options = client.transfer_options | constants.DataTransferOptions.ENCRYPT_AES
         client.auto_recv = True
         return True
