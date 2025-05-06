@@ -6,7 +6,9 @@ import threading
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Cipher import AES
 
-# TODO: How could we make a re-pair? we need to battle arp spoofing too
+# TODO: How could we make a re-pair? we need to battle arp spoofing too0
+# TODO: Make the frames sent over UDP
+
 
 class CameraServerCallbacks:
     def on_camera_discovered(self, camera_addr, camera_mac):

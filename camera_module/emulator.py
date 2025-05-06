@@ -276,64 +276,6 @@ class Camera:
         else:
             soc.send(length + data)
 
-    # def link_to_server(self):
-    #     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #     self.server_socket.connect((self.server_ip, self.server_port))
-    #     self.__send_fields(
-    #         self.server_socket,
-    #         (self.server_ip, self.server_port),
-    #         [b"CAMLINK-HSEC", self.CAMERA_MAC.encode()],
-    #     )
-
-    #     success = self.__handle_aes_key_exchange(self.server_socket)
-    #     if not success:
-    #         print("Failed to exchange keys with server.")
-    #         return
-        
-    #     print("Successfully linked to server.")
-    #     self.pairing_mode = False
-
-    # def discover_ping_loop(self):
-    #     self.pairing_mode = True
-
-    #     broadcast_ip = self.__get_broadcast_ip()
-    #     last_ping = time.time()
-    #     while self.pairing_mode and time.time() - last_ping < 3:
-    #         self.__send_fields(
-    #             self.discover_server,
-    #             (broadcast_ip, Constants.CAMERA_DISCOVER_PORT),
-    #             [b"CAMPAIR-HSEC", self.CAMERA_MAC.encode()],
-    #         )
-    #         print(f"Pairing mode: Sending discovery packet to {broadcast_ip}")
-    #         last_ping = time.time()
-
-    # def listen_for_pairing(self):
-    #     self.discover_server.settimeout(1)
-    #     while self.pairing_mode:
-    #         try:
-    #             fields, addr = self.__recv_fields(self.discover_server)
-    #             if len(fields) != 3:
-    #                 print(f"Invalid pairing message: {fields}")
-    #                 continue
-
-    #             if fields[0] == b"CAMACK-HSEC" and fields[2] == self.CAMERA_CODE.encode():
-    #                 self.server_ip = addr[0]
-    #                 self.server_port = fields[1]
-    #                 self.link_to_server()
-
-    #         except socket.timeout:
-    #             continue
-
-    # def repair_to_server(self):
-    #     pass
-
-    # def send_frame(self):
-    #     pass
-
-    # def take_picture(self):
-    #     pass
-
-
 if __name__ == "__main__":
     camera = Camera()
     while True:
