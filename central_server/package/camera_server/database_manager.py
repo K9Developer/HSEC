@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 
 class Camera:
     def __init__(self, mac, name, last_frame, key, red_zone, last_known_ip):
@@ -8,7 +9,6 @@ class Camera:
         self.key = key
         self.red_zone = red_zone
         self.last_known_ip = last_known_ip
-
         self.client = None
 
     def __repr__(self):
@@ -16,12 +16,19 @@ class Camera:
 
 class CameraDatabase:
     def __init__(self, db_path='cameras.db'):
-        self.conn = sqlite3.connect(db_path)
-        self.cursor = self.conn.cursor()
-        self._create_table()
+        self.db_path = db_path
+        self.local = threading.local()
+        self._init_main_thread()
 
-    def _create_table(self):
-        self.cursor.execute('''
+    def _get_conn(self):
+        if not hasattr(self.local, 'conn'):
+            self.local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self.local.cursor = self.local.conn.cursor()
+        return self.local.conn, self.local.cursor
+
+    def _init_main_thread(self):
+        conn, cursor = self._get_conn()
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS cameras (
                 mac TEXT PRIMARY KEY,
                 name TEXT,
@@ -31,51 +38,50 @@ class CameraDatabase:
                 last_known_ip TEXT
             )
         ''')
-        self.conn.commit()
+        conn.commit()
 
     def add_camera(self, mac, name, key, last_known_ip):
-        self.cursor.execute('''
+        conn, cursor = self._get_conn()
+        cursor.execute('''
             INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone, last_known_ip)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (mac, name, None, key, None, last_known_ip))
-        self.conn.commit()
+        conn.commit()
+        return Camera(mac, name, None, key, None, last_known_ip)
 
     def get_camera(self, mac):
-        self.cursor.execute('''
-            SELECT * FROM cameras WHERE mac = ?
-        ''', (mac,))
-        row = self.cursor.fetchone()
+        _, cursor = self._get_conn()
+        cursor.execute('SELECT * FROM cameras WHERE mac = ?', (mac,))
+        row = cursor.fetchone()
         return Camera(*row) if row else None
 
     def rename_camera(self, mac, new_name):
-        self.cursor.execute('''
-            UPDATE cameras SET name = ? WHERE mac = ?
-        ''', (new_name, mac))
-        self.conn.commit()
+        conn, cursor = self._get_conn()
+        cursor.execute('UPDATE cameras SET name = ? WHERE mac = ?', (new_name, mac))
+        conn.commit()
 
     def get_all_cameras(self):
-        self.cursor.execute('''
-            SELECT * FROM cameras
-        ''')
-        return [Camera(*row) for row in self.cursor.fetchall()]
+        _, cursor = self._get_conn()
+        cursor.execute('SELECT * FROM cameras')
+        return [Camera(*row) for row in cursor.fetchall()]
 
     def update_camera(self, mac, last_frame):
-        self.cursor.execute('''
-            UPDATE cameras SET last_frame = ? WHERE mac = ?
-        ''', (last_frame, mac))
-        self.conn.commit()
+        conn, cursor = self._get_conn()
+        cursor.execute('UPDATE cameras SET last_frame = ? WHERE mac = ?', (last_frame, mac))
+        conn.commit()
 
     def update_camera_ip(self, mac, last_known_ip):
-        self.cursor.execute('''
-            UPDATE cameras SET last_known_ip = ? WHERE mac = ?
-        ''', (last_known_ip, mac))
-        self.conn.commit()
+        conn, cursor = self._get_conn()
+        cursor.execute('UPDATE cameras SET last_known_ip = ? WHERE mac = ?', (last_known_ip, mac))
+        conn.commit()
 
     def set_red_zone(self, mac, red_zone):
-        self.cursor.execute('''
-            UPDATE cameras SET red_zone = ? WHERE mac = ?
-        ''', (red_zone, mac))
-        self.conn.commit()
+        conn, cursor = self._get_conn()
+        cursor.execute('UPDATE cameras SET red_zone = ? WHERE mac = ?', (red_zone, mac))
+        conn.commit()
 
     def close(self):
-        self.conn.close()
+        if hasattr(self.local, 'conn'):
+            self.local.conn.close()
+            del self.local.conn
+            del self.local.cursor

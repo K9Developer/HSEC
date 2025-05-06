@@ -30,28 +30,6 @@ class DefaultLogger(EmptyLogger):
         print(f"WARNING: {message}")
         pass
 
-def __handle_template(template: list, *args) -> list:
-    if not isinstance(template, list):
-        raise TypeError("Template must be a list")
-    
-    if len(template) != len(args):
-        raise ValueError("Template and args length mismatch")
-    
-    new_template = []
-    arg_index = 0
-    for i in range(len(template)):
-        if template[i] == constants.Options.ANY_VALUE_TEMPLATE.value:
-            new_template.append(args[arg_index])
-            arg_index += 1
-        elif template[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
-            new_template.extend(args[arg_index:])
-            break
-        else:
-            new_template.append(template[i])
-
-    return new_template
-        
-
 class SocketServer:
     def __init__(self, host: str = '127.0.0.1', port: int = 8080, accept_buffer: int =1000, protocol: constants.ServerProtocol = constants.ServerProtocol.TCP, logger = None, reserve_port=True):
         self.host = host
@@ -72,6 +50,28 @@ class SocketServer:
         self.message_callbacks: dict[tuple, callable] = {}
 
         self.logger.debug(f"SocketServer initialized with host={self.host}, port={self.port}, protocol={self.protocol}")
+
+    def __handle_template(template: list, *args) -> list:
+        if not isinstance(template, list):
+            raise TypeError("Template must be a list")
+        
+        if template.count(constants.Options.ANY_VALUE_TEMPLATE) != len(args) and template.count(constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE) == 0:
+            raise ValueError("Template and args length mismatch")
+        
+        new_template = []
+        arg_index = 0
+        for i in range(len(template)):
+            if template[i] == constants.Options.ANY_VALUE_TEMPLATE:
+                new_template.append(args[arg_index])
+                arg_index += 1
+            elif template[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
+                new_template.extend(args[arg_index:])
+                break
+            else:
+                new_template.append(template[i])
+
+        return new_template
+        
 
     def __get_broadcast_address(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -148,7 +148,11 @@ class SocketServer:
             return
         try:
             if self.protocol == constants.ServerProtocol.UDP:
-                client.socket.sendto(data, client.addr)
+                if constants.DataTransferOptions.WITH_SIZE in client.transfer_options:
+                    client.socket.sendto(data[:constants.Options.MESSAGE_SIZE_BYTE_LENGTH], client.addr)
+                    client.socket.sendto(data[constants.Options.MESSAGE_SIZE_BYTE_LENGTH:], client.addr)
+                else:
+                    client.socket.sendto(data, client.addr)
             else:
                 client.socket.sendall(data)
             self.logger.debug(f"Sent raw bytes to {client.addr}")
@@ -160,7 +164,7 @@ class SocketServer:
             if isinstance(d, str): return d.encode('utf-8')
             if isinstance(d, bytes): return d
             if isinstance(d, int): return str(d).encode('utf-8')
-            if isinstance(d, list): return constants.Options.MESSAGE_SEPARATOR.value.join([encoding(item) for item in d])
+            if isinstance(d, list): return constants.Options.MESSAGE_SEPARATOR.join([encoding(item) for item in d])
             raise TypeError(f"Unsupported data type: {type(d)}")
         
         return encoding(data)
@@ -175,7 +179,7 @@ class SocketServer:
             self.logger.debug("Data encrypted with AES for broadcast")
         
         if constants.DataTransferOptions.WITH_SIZE in options:
-            message_size = len(modified_data).to_bytes(constants.Options.MESSAGE_SIZE_BYTE_LENGTH.value, 'big')
+            message_size = len(modified_data).to_bytes(constants.Options.MESSAGE_SIZE_BYTE_LENGTH, 'big')
             modified_data = message_size + modified_data
             self.logger.debug(f"Data size prepended for broadcast: {len(modified_data)} bytes")
         
@@ -195,7 +199,7 @@ class SocketServer:
             self.logger.debug(f"Data encrypted with AES for {client.addr}")
         
         if constants.DataTransferOptions.WITH_SIZE in options:
-            message_size = len(modified_data).to_bytes(constants.Options.MESSAGE_SIZE_BYTE_LENGTH.value, 'big')
+            message_size = len(modified_data).to_bytes(constants.Options.MESSAGE_SIZE_BYTE_LENGTH, 'big')
             modified_data = message_size + modified_data
             self.logger.debug(f"Data size prepended for {client.addr}: {len(modified_data)} bytes")
         
@@ -214,7 +218,7 @@ class SocketServer:
                     break
                 data += chunk
           
-            self.logger.debug(f"Received raw bytes from {client.addr}: {data}")
+            self.logger.debug(f"Received raw bytes from {client.addr}: {len(data)} bytes")
             return data
         except Exception as e:
             self.logger.error(f"Error receiving raw bytes from {client.addr}: {e}")
@@ -227,7 +231,7 @@ class SocketServer:
         
         message = None
         if constants.DataTransferOptions.WITH_SIZE in options:
-            message_size = int.from_bytes(self.__receive_raw_bytes(client, constants.Options.MESSAGE_SIZE_BYTE_LENGTH.value), 'big')
+            message_size = int.from_bytes(self.__receive_raw_bytes(client, constants.Options.MESSAGE_SIZE_BYTE_LENGTH), 'big')
             self.logger.debug(f"Message size received from {client.addr}: {message_size} bytes")
             message = self.__receive_raw_bytes(client, message_size)
         
@@ -238,8 +242,9 @@ class SocketServer:
             cipher = client.get_aes()
             message = unpad(cipher.decrypt(message), AES.block_size)
             self.logger.debug(f"Data decrypted with AES for {client.addr}")
+            print("client:", client.random.hex())
         
-        return message.split(constants.Options.MESSAGE_SEPARATOR.value)
+        return message.split(constants.Options.MESSAGE_SEPARATOR)
 
     def receive_data_with_pattern(self, client: SocketClient, pattern: constants.SocketMessages, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE):
         if not isinstance(pattern, list):
@@ -255,7 +260,7 @@ class SocketServer:
 
         for i in range(len(pattern)):
             if pattern[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE: break
-            if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE.value and data[i] != pattern[i]:
+            if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE and data[i] != pattern[i]:
                 return False
 
         return data
@@ -275,7 +280,8 @@ class SocketServer:
         server_pubkey_bytes = server_pubkey.export_key(format='DER')
 
         self.logger.debug(f"Server ECDH public key generated for {client.addr}")
-        self.send_data(client, __handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes), constants.DataTransferOptions.WITH_SIZE)
+        print("Sending:", SocketServer.__handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes))
+        self.send_data(client, SocketServer.__handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes), constants.DataTransferOptions.WITH_SIZE)
         self.logger.debug(f"Sent server ECDH public key to {client.addr}")
 
         client_pubkey = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_HELLO, constants.DataTransferOptions.WITH_SIZE)
@@ -283,7 +289,7 @@ class SocketServer:
             self.logger.error(f"Client ECDH public key not received from {client.addr}")
             return False
 
-        client_pubkey_obj = ECC.import_key(client_pubkey[3])
+        client_pubkey_obj = ECC.import_key(constants.Options.MESSAGE_SEPARATOR.join(client_pubkey[3:]))
         shared_point = server_privkey.d * client_pubkey_obj.pointQ
         shared_secret = int(shared_point.x).to_bytes(32, 'big')
 
@@ -293,12 +299,15 @@ class SocketServer:
             return False
 
         client.random = shared_secret
-        aes = client.get_aes()
 
-        decrypted_message = unpad(aes.decrypt(confirm_message[0]), AES.block_size)
+        decrypted_message = unpad(client.get_aes().decrypt(confirm_message[0]), AES.block_size)
         if decrypted_message != b"confirm":
             self.logger.error(f"Client confirmation message not received correctly from {client.addr}")
             return False
+        
+        encrypted_message = client.get_aes().encrypt(pad(b"confirm", AES.block_size))
+        self.send_data(client, SocketServer.__handle_template(constants.SocketMessages.AesKeyExchange.SERVER_KEY_CONFIRM, encrypted_message), constants.DataTransferOptions.WITH_SIZE)
+        self.logger.debug(f"Client confirmation message sent to {client.addr}")
 
         self.logger.debug(f"Client confirmation message received from {client.addr}")
         client.transfer_options = client.transfer_options | constants.DataTransferOptions.ENCRYPT_AES

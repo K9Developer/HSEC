@@ -18,7 +18,7 @@ class DataTransferOptions(enum.Flag):
     WITH_SIZE = enum.auto()
     ENCRYPT_AES = enum.auto()
 
-class Options(enum.Enum):
+class Options:
     MESSAGE_SIZE_BYTE_LENGTH = 4
     MESSAGE_SEPARATOR = b"\0"
     ANY_VALUE_TEMPLATE = b"\0"

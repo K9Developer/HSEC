@@ -17,4 +17,4 @@ class SocketClient:
         assert isinstance(self.random, bytes), "Random value must be of type bytes"
     
     def get_aes(self):
-        return self.aes_obj if self.aes_obj else AES.new(self.random, AES.MODE_CBC, self.random[:AES.block_size])
+        return AES.new(self.random, AES.MODE_CBC, self.random[:AES.block_size])

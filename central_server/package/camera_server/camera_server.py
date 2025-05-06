@@ -23,31 +23,6 @@ class CameraServerCallbacks:
     
     def on_camera_frame(self, camera_mac, frame):
         raise NotImplementedError("on_camera_frame method not implemented")
-    
-def __does_match_pattern(data, pattern):
-    if len(data) != len(pattern):
-        return False
-    
-    for i in range(len(data)):
-        if data[i] != pattern[i] and pattern[i] != constants.Options.TEMPLATE_ANY_VALUE:
-            return False
-        
-    return True
-
-def __handle_template(template, *args):
-    if template.count(constants.Options.TEMPLATE_ANY_VALUE) != len(args):
-        raise ValueError("Number of arguments does not match the number of template placeholders")
-    
-    new_template = []
-    placeholder_ind = 0
-    for i in range(len(template)):
-        if template[i] == constants.Options.TEMPLATE_ANY_VALUE:
-            new_template.append(args[placeholder_ind])
-            placeholder_ind += 1
-        else:
-            new_template.append(template[i])
-    
-    return new_template
 
 class CameraServer:
     def __init__(self, callbacks: CameraServerCallbacks, logger=DefaultLogger()):
@@ -67,9 +42,10 @@ class CameraServer:
         self.camera_server = SocketServer(
             host="0.0.0.0",
             port=Constants.CAMERA_HANDLER_PORT,
-            protocol=constants.ServerProtocol.UDP,
+            protocol=constants.ServerProtocol.TCP,
             logger=logger,
         )
+        self.camera_server.start()
 
         self.callbacks = callbacks
         self.discovering_cameras = True
@@ -98,13 +74,40 @@ class CameraServer:
             self.__handle_frame,
         )
 
+    def __does_match_pattern(data, pattern):
+        if len(data) != len(pattern):
+            print(f"Data length {len(data)} does not match pattern length {len(pattern)}")
+            return False
+        
+        for i in range(len(data)):
+            if data[i] != pattern[i] and pattern[i] != constants.Options.ANY_VALUE_TEMPLATE:
+                print(f"Data {data[i]} does not match pattern {pattern[i]}")
+                return False
+            
+        return True
+
+    def __handle_template(template, *args):
+        if template.count(constants.Options.ANY_VALUE_TEMPLATE) != len(args):
+            raise ValueError("Number of arguments does not match the number of template placeholders")
+        
+        new_template = []
+        placeholder_ind = 0
+        for i in range(len(template)):
+            if template[i] == constants.Options.ANY_VALUE_TEMPLATE:
+                new_template.append(args[placeholder_ind])
+                placeholder_ind += 1
+            else:
+                new_template.append(template[i])
+        
+        return new_template
+
     def __validate_camera_mac(self, camera_mac):
         return camera_mac.startswith(Constants.CAMERA_MAC_PREFIX)
 
-    def __build_camera_client(self, camera_addr):
+    def __build_camera_client(self, camera_addr, soc=None):
         return SocketClient(
             addr=camera_addr,
-            socket=None
+            socket=soc
         )
 
     def discover_cameras(self, timeout=-1):
@@ -112,11 +115,14 @@ class CameraServer:
         self.camera_discover_server.server_socket.settimeout(1)
         while self.discovering_cameras and (timeout == -1 or time.time() - start < timeout):
             try:
-                addr, data = self.camera_discover_server.server_socket.recvfrom(1024)
+                data, addr = self.camera_discover_server.server_socket.recvfrom(1024)
+                data = data.split(constants.Options.MESSAGE_SEPARATOR)
+                print(f"Received data: {data}", CameraServer.__does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY))
             except socket.timeout:
                 continue
-            if __does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY):
-                fields = data.split(constants.Options.MESSAGE_SEPARATOR)
+
+            if CameraServer.__does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY):
+                fields = data
                 if len(fields) != 2:
                     self.logger.error(f"Invalid camera pairing message: {data}")
                     continue
@@ -127,12 +133,12 @@ class CameraServer:
                     continue
 
                 self.logger.info(f"Camera pairing request from {addr} with MAC {camera_mac}")
-                self.new_camera_callback(addr, camera_mac)
+                self.callbacks.on_camera_discovered(addr, camera_mac)
     
     def pair_camera(self, camera_addr, camera_code):
         self.camera_discover_server.send_data(
-            self.__build_camera_client(camera_addr),
-            __handle_template(Messages.CAMERA_PAIRING_RESPONSE, Constants.CAMERA_HANDLER_PORT, camera_code),
+            self.__build_camera_client(camera_addr, self.camera_discover_server.server_socket),
+            CameraServer.__handle_template(Messages.CAMERA_PAIRING_RESPONSE, Constants.CAMERA_HANDLER_PORT, camera_code),
         )
         self.cameras_awaiting_pairing.add(camera_addr[0])
 
@@ -199,7 +205,7 @@ class CameraServer:
 
             # TODO: susceptible to replay attacks
             encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair"))
-            self.camera_server.send_data(camera.client, __handle_template(Messages.CAMERA_REPAIR_CONFIRM, encrypted_confirm))
+            self.camera_server.send_data(camera.client, CameraServer.__handle_template(Messages.CAMERA_REPAIR_CONFIRM, encrypted_confirm))
             data = self.camera_server.receive_data_with_pattern(camera.client, Messages.CAMERA_REPAIR_CONFIRM_ACK, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES)
             if data is None:
                 self.logger.error(f"Failed to receive repair confirmation from camera {camera_mac}")
@@ -228,20 +234,18 @@ class CameraServer:
             return
 
         def __handle_pair(camera_mac):
-            camera_client = self.__build_camera_client(camera_cli.addr)
-
-            success = self.camera_server.exchange_aes_key_with_ecdh(camera_client)
+            success = self.camera_server.exchange_aes_key_with_ecdh(camera_cli)
             if not success:
                 self.logger.error("Failed to exchange keys with camera.")
                 self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
                 self.callbacks.on_camera_pairing_failed(camera_cli.addr, camera_mac, "Failed to exchange keys")
                 return
             
-            camera_name = f"HSEC {''.join(camera_mac.split(':')[-3:])}"
-            camera = self.db.add_camera(camera_mac, camera_name, camera_client.random, camera_cli.addr[0])
+            camera_name = f"HSEC {''.join(camera_mac.decode().split(':')[-3:])}"
+            camera = self.db.add_camera(camera_mac, camera_name, camera_cli.random, camera_cli.addr[0])
             self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
             self.callbacks.on_camera_paired(camera_cli.addr, camera_mac)
-            camera.client = camera_client
+            camera.client = camera_cli
             self.connected_cameras[camera_mac] = camera
 
         thread = threading.Thread(target=__handle_pair, args=(fields[1],))
