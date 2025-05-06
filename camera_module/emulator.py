@@ -84,16 +84,14 @@ class Camera:
             print("No server socket available for streaming.")
             return
         
-        # grab from webcam
         ret, frame = self.camera_handle.read()
         if not ret:
             print("Error: Could not read frame from webcam.")
             return
 
-        # encode frame as JPEG
         _, buffer = cv2.imencode('.jpg', frame)
         data = buffer.tobytes()
-
+        
         # send frame to server
         self.__send_fields(
             self.server_socket,
@@ -134,6 +132,7 @@ class Camera:
         self.current_state |= State.LINKED
 
     def __discover_ping(self):
+        print("Sending discovery ping...")
         self.broadcast_ip = self.__get_broadcast_ip() if self.broadcast_ip is None else self.broadcast_ip
         self.discover_server.sendto(
             Constants.MESSAGE_SEPARATOR.join([b"CAMPAIR-HSEC", self.CAMERA_MAC.encode()]),
@@ -143,7 +142,9 @@ class Camera:
     def __check_pairing_request(self):
         self.discover_server.settimeout(1)
         try:
-            fields, addr = self.discover_server.recvfrom(1024)
+            print("Checking for pairing requests...")
+            fields, addr = self.__recv_fields(self.discover_server)
+            
             if len(fields) != 3:
                 print(f"Invalid pairing message: {fields}")
                 return
@@ -158,9 +159,12 @@ class Camera:
 
     def __link_to_server(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print(f"Connecting to server at {self.server_ip}:{self.server_port}...")
         self.server_socket.connect((self.server_ip, self.server_port))
-        self.server_socket.sendall(
-            Constants.MESSAGE_SEPARATOR.join([b"CAMLINK-HSEC", self.CAMERA_MAC.encode()])
+        self.__send_fields(
+            self.server_socket,
+            (self.server_ip, self.server_port),
+            [b"CAMLINK-HSEC", self.CAMERA_MAC.encode()],
         )
 
         success, shared_secret = self.__handle_aes_key_exchange(self.server_socket)
@@ -168,27 +172,10 @@ class Camera:
             print("Failed to exchange keys with server.")
             return
         
-        self.aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
-        confirm_encrypted = self.aes.encrypt(pad(b"confirm"))
-        self.__send_fields(
-            self.server_socket,
-            (self.server_ip, self.server_port),
-            [confirm_encrypted],
-        )
-
-        confirm_encrypted = self.__recv_fields(self.server_socket, decrypt=True)
-        if len(confirm_encrypted) != 1:
-            print("Invalid confirmation message received")
-            return
-        
-        decrypted_confirm = self.aes.decrypt(unpad(confirm_encrypted[0], AES.block_size))
-        if decrypted_confirm != b"confirm":
-            print("Invalid confirmation message received")
-            return
-        
         print("Successfully linked to server.")
         self.current_state &= ~State.DISCOVERING
         self.current_state |= State.LINKED
+        self.aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
 
     def __get_broadcast_ip(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -198,20 +185,22 @@ class Camera:
             return str(net.broadcast_address)
    
     def __handle_aes_key_exchange(self, soc: socket.socket):
-        server_hello = self.__recv_fields(soc)
-        if len(server_hello) != 4 or \
-        server_hello[0] != b"exch" or \
+        server_hello, _ = self.__recv_fields(soc)
+        print(f"Received server hello: {server_hello}")
+        if server_hello[0] != b"exch" or \
         server_hello[1] != b"ecdh" or \
         server_hello[2] != b"aes":
             return False, None
 
-        raw_server_pubkey = server_hello[3]
+        raw_server_pubkey = Constants.MESSAGE_SEPARATOR.join(server_hello[3:])
         server_pubkey = ECC.import_key(raw_server_pubkey)
+        print(f"Server public key: {server_pubkey.export_key(format='PEM')}")
 
         private_key = ECC.generate(curve='P-256')
         shared_secret_point = private_key.d * server_pubkey.pointQ
         shared_secret = int(shared_secret_point.x).to_bytes(32, 'big')
         pubkey_bytes = private_key.public_key().export_key(format='DER')
+        print(f"SHARED SECRET: {shared_secret.hex()}")
 
         self.__send_fields(
             soc,
@@ -219,50 +208,54 @@ class Camera:
             [b"exch", b"ecdh", b"aes", pubkey_bytes],
         )
 
-        aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
-        encrypted_confirm = aes.encrypt(pad(b"confirm", AES.block_size))
+        aes_enc = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
+        encrypted_confirm = aes_enc.encrypt(pad(b"confirm", AES.block_size))
         self.__send_fields(
             soc,
             (self.server_ip, self.server_port),
             [encrypted_confirm],
         )
+        print(f"Sent encrypted confirmation: {encrypted_confirm}")
 
-        encrypted_confirm = self.__recv_fields(soc, decrypt=True)
+        print("Waiting for confirmation...")
+        encrypted_confirm, _ = self.__recv_fields(soc, decrypt=True)
+        print(f"Received encrypted confirmation: {encrypted_confirm[0]}")
         if len(encrypted_confirm) != 1:
             return False, None
 
-        decrypted_confirm = aes.decrypt(unpad(encrypted_confirm[0], AES.block_size))
+        aes_dec = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
+        decrypted_confirm = unpad(aes_dec.decrypt(encrypted_confirm[0]), AES.block_size)
         if decrypted_confirm != b"confirm":
             return False, None
 
+        print("Successfully exchanged keys with server.")
         return True, shared_secret
 
     def __recv_fields(self, soc: socket.socket, decrypt=False):
-       recv_func = soc.recvfrom if soc.type == socket.SOCK_DGRAM else soc.recv
-
-       len_bytes, addr = recv_func(Constants.MESSAGE_LENGTH_BYTES)
-       if len(len_bytes) != Constants.MESSAGE_LENGTH_BYTES:
-           raise ValueError("Invalid length bytes received")
-       
-       length = int.from_bytes(len_bytes, byteorder='big')
-       data = recv_func(length)
-       if len(data) != length:
-           raise ValueError("Invalid data length received")
-       
-       if decrypt and self.aes:
-           data = unpad(self.aes.decrypt(data), AES.block_size)
-
-       return data.split(Constants.MESSAGE_SEPARATOR), addr
+        recv_func = soc.recvfrom if soc.type == socket.SOCK_DGRAM else lambda x: (soc.recv(x), soc.getpeername())
+        x= recv_func(Constants.MESSAGE_LENGTH_BYTES)
+        len_bytes, addr = x
+        if len(len_bytes) != Constants.MESSAGE_LENGTH_BYTES:
+            raise ValueError("Invalid length bytes received")
+        
+        length = int.from_bytes(len_bytes, byteorder='big')
+        data, _ = recv_func(length)
+        if len(data) != length:
+            raise ValueError("Invalid data length received")
+        
+        if decrypt and self.aes:
+            data = unpad(self.aes.decrypt(data), AES.block_size)
+        return data.split(Constants.MESSAGE_SEPARATOR), addr
 
     def __send_fields(self, soc: socket.socket, addr, fields, encrypt=False):
         data = Constants.MESSAGE_SEPARATOR.join(fields)
-        
         if encrypt and self.aes:
             data = self.aes.encrypt(pad(data, AES.block_size))
 
         length = len(data).to_bytes(Constants.MESSAGE_LENGTH_BYTES, byteorder='big')
         if soc.type == socket.SOCK_DGRAM:
-            soc.sendto(length + data, addr)
+            soc.sendto(length, addr)
+            soc.sendto(data, addr)
         else:
             soc.send(length + data)
 
@@ -270,4 +263,3 @@ if __name__ == "__main__":
     camera = Camera()
     while True:
         camera.loop()
-        time.sleep(0.1)
