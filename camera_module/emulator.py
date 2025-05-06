@@ -198,46 +198,45 @@ class Camera:
             return str(net.broadcast_address)
    
     def __handle_aes_key_exchange(self, soc: socket.socket):
-    server_hello = self.__recv_fields(soc)
-    if len(server_hello) != 4 or \
-       server_hello[0] != b"exch" or \
-       server_hello[1] != b"ecdh" or \
-       server_hello[2] != b"aes":
-        return False, None
+        server_hello = self.__recv_fields(soc)
+        if len(server_hello) != 4 or \
+        server_hello[0] != b"exch" or \
+        server_hello[1] != b"ecdh" or \
+        server_hello[2] != b"aes":
+            return False, None
 
-    raw_server_pubkey = server_hello[3]
-    server_pubkey = ECC.import_key(raw_server_pubkey)
+        raw_server_pubkey = server_hello[3]
+        server_pubkey = ECC.import_key(raw_server_pubkey)
 
-    private_key = ECC.generate(curve='P-256')
-    shared_secret_point = private_key.d * server_pubkey.pointQ
-    shared_secret = int(shared_secret_point.x).to_bytes(32, 'big')
-    pubkey_bytes = private_key.public_key().export_key(format='DER')
+        private_key = ECC.generate(curve='P-256')
+        shared_secret_point = private_key.d * server_pubkey.pointQ
+        shared_secret = int(shared_secret_point.x).to_bytes(32, 'big')
+        pubkey_bytes = private_key.public_key().export_key(format='DER')
 
-    self.__send_fields(
-        soc,
-        (self.server_ip, self.server_port),
-        [b"exch", b"ecdh", b"aes", pubkey_bytes],
-    )
+        self.__send_fields(
+            soc,
+            (self.server_ip, self.server_port),
+            [b"exch", b"ecdh", b"aes", pubkey_bytes],
+        )
 
-    aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
-    encrypted_confirm = aes.encrypt(pad(b"confirm", AES.block_size))
-    self.__send_fields(
-        soc,
-        (self.server_ip, self.server_port),
-        [encrypted_confirm],
-    )
+        aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
+        encrypted_confirm = aes.encrypt(pad(b"confirm", AES.block_size))
+        self.__send_fields(
+            soc,
+            (self.server_ip, self.server_port),
+            [encrypted_confirm],
+        )
 
-    encrypted_confirm = self.__recv_fields(soc, decrypt=True)
-    if len(encrypted_confirm) != 1:
-        return False, None
+        encrypted_confirm = self.__recv_fields(soc, decrypt=True)
+        if len(encrypted_confirm) != 1:
+            return False, None
 
-    decrypted_confirm = aes.decrypt(unpad(encrypted_confirm[0], AES.block_size))
-    if decrypted_confirm != b"confirm":
-        return False, None
+        decrypted_confirm = aes.decrypt(unpad(encrypted_confirm[0], AES.block_size))
+        if decrypted_confirm != b"confirm":
+            return False, None
 
-    return True, shared_secret
+        return True, shared_secret
 
-    
     def __recv_fields(self, soc: socket.socket, decrypt=False):
        recv_func = soc.recvfrom if soc.type == socket.SOCK_DGRAM else soc.recv
 
