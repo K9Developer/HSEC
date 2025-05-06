@@ -3,11 +3,9 @@ from socket_server_lib import constants
 import socket
 import threading
 from socket_server_lib.client import SocketClient
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-
+from Cryptodome.PublicKey import ECC
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import pad, unpad
 
 class EmptyLogger:
     def info(self, message: str): pass
@@ -264,7 +262,7 @@ class SocketServer:
 
     def exchange_aes_key_with_ecdh(self, client: SocketClient):
         """
-        Elliptic Curve Diffie-Hellman key exchange
+        Elliptic Curve Diffie-Hellman key exchange using pycryptodome
 
         server -> client: exch, ecdh, aes, server_pubkey
         client -> server: exch, ecdh, aes, client_pubkey
@@ -272,38 +270,36 @@ class SocketServer:
         """
 
         client.auto_recv = False
-        server_privkey = ec.generate_private_key(ec.SECP256R1())
+        server_privkey = ECC.generate(curve='P-256')
         server_pubkey = server_privkey.public_key()
-        server_pubkey_bytes = server_pubkey.public_bytes(
-            encoding=serialization.Encoding.X962,
-            format=serialization.PublicFormat.UncompressedPoint
-        )
+        server_pubkey_bytes = server_pubkey.export_key(format='DER')
 
         self.logger.debug(f"Server ECDH public key generated for {client.addr}")
         self.send_data(client, __handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes), constants.DataTransferOptions.WITH_SIZE)
         self.logger.debug(f"Sent server ECDH public key to {client.addr}")
+
         client_pubkey = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_HELLO, constants.DataTransferOptions.WITH_SIZE)
         if not client_pubkey:
             self.logger.error(f"Client ECDH public key not received from {client.addr}")
             return False
-        
-        important_client_pubkey = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), client_pubkey[3])
-        shared_secret = server_privkey.exchange(ec.ECDH(), important_client_pubkey)
-        self.logger.debug(f"Shared secret computed for {client.addr}")
+
+        client_pubkey_obj = ECC.import_key(client_pubkey[3])
+        shared_point = server_privkey.d * client_pubkey_obj.pointQ
+        shared_secret = int(shared_point.x).to_bytes(32, 'big')
 
         confirm_message = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_KEY_CONFIRM, constants.DataTransferOptions.WITH_SIZE)
         if not confirm_message:
             self.logger.error(f"Client confirmation not received from {client.addr}")
             return False
-        
+
         client.random = shared_secret
         aes = client.get_aes()
 
         decrypted_message = unpad(aes.decrypt(confirm_message[0]), AES.block_size)
         if decrypted_message != b"confirm":
-            self.logger.error(f"Client confirmation message not received from {client.addr}")
+            self.logger.error(f"Client confirmation message not received correctly from {client.addr}")
             return False
-        
+
         self.logger.debug(f"Client confirmation message received from {client.addr}")
         client.transfer_options = client.transfer_options | constants.DataTransferOptions.ENCRYPT_AES
         client.auto_recv = True

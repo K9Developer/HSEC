@@ -3,8 +3,8 @@ from camera_server.constants import Constants, Messages
 import socket
 from camera_server.database_manager import CameraDatabase, Camera
 import threading
-from Crypto.Util.Padding import pad, unpad
-from Crypto.Cipher import AES
+from Cryptodome.Util.Padding import pad, unpad
+from Cryptodome.Cipher import AES
 
 # TODO: How could we make a re-pair? we need to battle arp spoofing too0
 # TODO: Make the frames sent over UDP

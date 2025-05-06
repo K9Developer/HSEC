@@ -1,7 +1,7 @@
 import os
 import socket
 from socket_server_lib import constants
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
 
 class SocketClient:
     def __init__(self, socket: socket.socket, addr: tuple, transfer_options: constants.DataTransferOptions = None, client_thread=None, random=None):

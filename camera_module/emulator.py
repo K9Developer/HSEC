@@ -1,10 +1,10 @@
 import ipaddress
 import socket
 import time
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
+from Cryptodome.PublicKey import ECC
+from Cryptodome.Hash import SHA256
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import pad, unpad
 import enum
 import cv2
 
@@ -156,14 +156,6 @@ class Camera:
         except socket.timeout:
             pass
 
-    def __handle_aes_key_exchange(self, soc: socket.socket):
-        server_hello = self.__recv_fields(soc)
-        if len(server_hello) != 4 or \
-           server_hello[0] != b"exch" or \
-           server_hello[1] != b"ecdh" or \
-           server_hello[2] != b"aes":
-            return False
-
     def __link_to_server(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.connect((self.server_ip, self.server_port))
@@ -206,45 +198,44 @@ class Camera:
             return str(net.broadcast_address)
    
     def __handle_aes_key_exchange(self, soc: socket.socket):
-        server_hello = self.__recv_fields(soc)
-        if len(server_hello) != 4 or \
-           server_hello[0] != b"exch" or \
-           server_hello[1] != b"ecdh" or \
-           server_hello[2] != b"aes":
-            return False, None
-        
-        raw_server_pubkey = server_hello[3]
-        server_pubkey = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), raw_server_pubkey)
-        private_key = ec.generate_private_key(ec.SECP256R1())
-        shared_secret = private_key.exchange(ec.ECDH(), server_pubkey)
-        pubkey = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.X962,
-            format=serialization.PublicFormat.UncompressedPoint
-        )
+    server_hello = self.__recv_fields(soc)
+    if len(server_hello) != 4 or \
+       server_hello[0] != b"exch" or \
+       server_hello[1] != b"ecdh" or \
+       server_hello[2] != b"aes":
+        return False, None
 
-        self.__send_fields(
-            soc,
-            (self.server_ip, self.server_port),
-            [b"exch", b"ecdh", b"aes", pubkey],
-        )
+    raw_server_pubkey = server_hello[3]
+    server_pubkey = ECC.import_key(raw_server_pubkey)
 
-        aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
-        encrypted_confirm = aes.encrypt(pad(b"confirm"))
-        self.__send_fields(
-            soc,
-            (self.server_ip, self.server_port),
-            [encrypted_confirm],
-        )
+    private_key = ECC.generate(curve='P-256')
+    shared_secret_point = private_key.d * server_pubkey.pointQ
+    shared_secret = int(shared_secret_point.x).to_bytes(32, 'big')
+    pubkey_bytes = private_key.public_key().export_key(format='DER')
 
-        encrypted_confirm = self.__recv_fields(soc, decrypt=True)
-        if len(encrypted_confirm) != 1:
-            return False, None
-        
-        decrypted_confirm = aes.decrypt(unpad(encrypted_confirm[0], AES.block_size))
-        if decrypted_confirm != b"confirm":
-            return False, None
+    self.__send_fields(
+        soc,
+        (self.server_ip, self.server_port),
+        [b"exch", b"ecdh", b"aes", pubkey_bytes],
+    )
 
-        return True, shared_secret
+    aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
+    encrypted_confirm = aes.encrypt(pad(b"confirm", AES.block_size))
+    self.__send_fields(
+        soc,
+        (self.server_ip, self.server_port),
+        [encrypted_confirm],
+    )
+
+    encrypted_confirm = self.__recv_fields(soc, decrypt=True)
+    if len(encrypted_confirm) != 1:
+        return False, None
+
+    decrypted_confirm = aes.decrypt(unpad(encrypted_confirm[0], AES.block_size))
+    if decrypted_confirm != b"confirm":
+        return False, None
+
+    return True, shared_secret
 
     
     def __recv_fields(self, soc: socket.socket, decrypt=False):
@@ -259,7 +250,7 @@ class Camera:
        if len(data) != length:
            raise ValueError("Invalid data length received")
        
-       if decrypt and self.aes_code:
+       if decrypt and self.aes:
            data = unpad(self.aes.decrypt(data), AES.block_size)
 
        return data.split(Constants.MESSAGE_SEPARATOR), addr
@@ -267,7 +258,7 @@ class Camera:
     def __send_fields(self, soc: socket.socket, addr, fields, encrypt=False):
         data = Constants.MESSAGE_SEPARATOR.join(fields)
         
-        if encrypt and self.aes_code:
+        if encrypt and self.aes:
             data = self.aes.encrypt(pad(data, AES.block_size))
 
         length = len(data).to_bytes(Constants.MESSAGE_LENGTH_BYTES, byteorder='big')
