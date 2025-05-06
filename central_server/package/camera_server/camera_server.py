@@ -1,7 +1,8 @@
-from socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
-from camera_server.constants import Constants, Messages
+import time
+from ..socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
+from package.camera_server.constants import Constants, Messages
 import socket
-from camera_server.database_manager import CameraDatabase, Camera
+from package.camera_server.database_manager import CameraDatabase, Camera
 import threading
 from Cryptodome.Util.Padding import pad, unpad
 from Cryptodome.Cipher import AES
@@ -106,9 +107,10 @@ class CameraServer:
             socket=None
         )
 
-    def discover_cameras(self):
+    def discover_cameras(self, timeout=-1):
+        start = time.time()
         self.camera_discover_server.server_socket.settimeout(1)
-        while self.discovering_cameras:
+        while self.discovering_cameras and (timeout == -1 or time.time() - start < timeout):
             try:
                 addr, data = self.camera_discover_server.server_socket.recvfrom(1024)
             except socket.timeout:

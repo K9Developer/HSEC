@@ -1,8 +1,8 @@
 import ipaddress
-from socket_server_lib import constants
+from package.socket_server_lib import constants
 import socket
 import threading
-from socket_server_lib.client import SocketClient
+from package.socket_server_lib.client import SocketClient
 from Cryptodome.PublicKey import ECC
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad, unpad

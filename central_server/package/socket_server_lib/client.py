@@ -1,6 +1,6 @@
 import os
 import socket
-from socket_server_lib import constants
+from package.socket_server_lib import constants
 from Cryptodome.Cipher import AES
 
 class SocketClient:

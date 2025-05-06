@@ -28,7 +28,7 @@ class CameraDatabase:
                 last_frame TEXT,
                 key TEXT,
                 red_zone TEXT,
-                last_known_ip TEXT,
+                last_known_ip TEXT
             )
         ''')
         self.conn.commit()

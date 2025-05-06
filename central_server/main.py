@@ -1,23 +1,17 @@
-import camera_server
-from camera_server import camera_server
-import threading
+from package.camera_server.camera_server import CameraServer, CameraServerCallbacks
 
-t = threading.Thread(target=lambda: camera_server.CameraServer().scan_for_cameras(timeout=5))
-t.daemon = True
-t.start()
+class Callbacks(CameraServerCallbacks):
+    def on_camera_discovered(self, camera_mac, camera_name, camera_key, last_known_ip):
+        print(f"Camera discovered: {camera_mac}, Name: {camera_name}, Key: {camera_key}, IP: {last_known_ip}")
 
+    def on_camera_frame_received(self, camera_mac, frame_data):
+        print(f"Frame received from {camera_mac}")
 
-import socket
+    def on_camera_repair_request(self, camera_mac):
+        print(f"Repair request from {camera_mac}")
 
-print("Starting UDP server...")
-s1 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s1.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s1.bind(("0.0.0.0", 5000))
+    def on_camera_repair_confirmed(self, camera_mac):
+        print(f"Repair confirmed for {camera_mac}")
 
-while True:
-    data, addr = s.recvfrom(1024)
-    if addr == s.getsockname():
-        continue
-    print(f"2Received message: {data} from {addr}")
-    print(f"3Sending ACK to {addr}")
-    s.sendto(b"ACK", addr)
+cs = CameraServer(Callbacks)
+cs.discover_cameras(30)
