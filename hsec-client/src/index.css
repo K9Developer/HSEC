@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@tailwind utilities;
+
+@layer utilities {
+    .click-effect {
+        @apply transition-transform active:scale-97 active:duration-75 active:ease-in;
+    }
+}
+
+@theme {
+    --color-bg: #243642;
+    --color-primary: #387478;
+    --color-primary2: #629584;
+    --color-secondary: #e2f1e7;
+}
+
+:root {
+    font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    width: 100vw;
+    height: 100vh;
+}
+
+#root {
+    width: 100vw;
+    height: 100vh;
+}

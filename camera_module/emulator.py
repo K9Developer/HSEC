@@ -4,7 +4,6 @@ import time
 from Cryptodome.PublicKey import ECC
 from Cryptodome.Hash import SHA256
 from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import pad, unpad
 import enum
 import cv2
 
@@ -49,6 +48,7 @@ class Camera:
         self.server_socket = None
         self.aes = None
         self.broadcast_ip = None
+        self.shared_secret = None
 
         self.camera_handle = cv2.VideoCapture(0)
         if not self.camera_handle.isOpened():
@@ -89,7 +89,7 @@ class Camera:
             print("Error: Could not read frame from webcam.")
             return
 
-        _, buffer = cv2.imencode('.jpg', frame)
+        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
         data = buffer.tobytes()
         
         # send frame to server
@@ -115,12 +115,12 @@ class Camera:
             print(f"Invalid repair message: {fields}")
             return
         
-        decrypted_confirm = self.aes.decrypt(unpad(fields[1], AES.block_size))
+        decrypted_confirm = self.aes.decrypt(fields[1])
         if decrypted_confirm != b"confirm-pair":
             print("Invalid confirmation message received")
             return
         
-        encrypted_confirm = self.aes.encrypt(pad(b"confirm-pair-ack", AES.block_size))
+        encrypted_confirm = self.aes.encrypt(b"confirm-pair-ack")
         self.__send_fields(
             self.server_socket,
             (self.server_ip, self.server_port),
@@ -175,7 +175,7 @@ class Camera:
         print("Successfully linked to server.")
         self.current_state &= ~State.DISCOVERING
         self.current_state |= State.LINKED
-        self.aes = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
+        self.shared_secret = shared_secret
 
     def __get_broadcast_ip(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -200,7 +200,7 @@ class Camera:
         shared_secret_point = private_key.d * server_pubkey.pointQ
         shared_secret = int(shared_secret_point.x).to_bytes(32, 'big')
         pubkey_bytes = private_key.public_key().export_key(format='DER')
-        print(f"SHARED SECRET: {shared_secret.hex()}")
+        print(f"SHARED SECRET: {shared_secret}")
 
         self.__send_fields(
             soc,
@@ -208,8 +208,8 @@ class Camera:
             [b"exch", b"ecdh", b"aes", pubkey_bytes],
         )
 
-        aes_enc = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
-        encrypted_confirm = aes_enc.encrypt(pad(b"confirm", AES.block_size))
+        aes_enc = AES.new(shared_secret, AES.MODE_CTR, nonce=shared_secret[:8])
+        encrypted_confirm = aes_enc.encrypt(b"confirm")
         self.__send_fields(
             soc,
             (self.server_ip, self.server_port),
@@ -223,8 +223,8 @@ class Camera:
         if len(encrypted_confirm) != 1:
             return False, None
 
-        aes_dec = AES.new(shared_secret, AES.MODE_CBC, shared_secret[:16])
-        decrypted_confirm = unpad(aes_dec.decrypt(encrypted_confirm[0]), AES.block_size)
+        aes_dec = AES.new(shared_secret, AES.MODE_CTR, nonce=shared_secret[:8])
+        decrypted_confirm = aes_dec.decrypt(encrypted_confirm[0])
         if decrypted_confirm != b"confirm":
             return False, None
 
@@ -244,13 +244,14 @@ class Camera:
             raise ValueError("Invalid data length received")
         
         if decrypt and self.aes:
-            data = unpad(self.aes.decrypt(data), AES.block_size)
+            data = self.aes.decrypt(data)
         return data.split(Constants.MESSAGE_SEPARATOR), addr
 
     def __send_fields(self, soc: socket.socket, addr, fields, encrypt=False):
         data = Constants.MESSAGE_SEPARATOR.join(fields)
-        if encrypt and self.aes:
-            data = self.aes.encrypt(pad(data, AES.block_size))
+        if encrypt:
+            aes = AES.new(self.shared_secret, AES.MODE_CTR, nonce=self.shared_secret[:8])
+            data = aes.encrypt(data)
 
         length = len(data).to_bytes(Constants.MESSAGE_LENGTH_BYTES, byteorder='big')
         if soc.type == socket.SOCK_DGRAM:
@@ -263,3 +264,5 @@ if __name__ == "__main__":
     camera = Camera()
     while True:
         camera.loop()
+
+# TODO: Figure out if this will actually work, EG: watch tutorials to see it working, then figure out how to code it
