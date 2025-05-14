@@ -49,6 +49,12 @@ const TMP_CAMERA_DATA: Camera[] = [
 
 // TODO: Have some DataManager, for example DataManager.getCameras(), DataManager.login(), ...
 
+const emailToName = (email?: string) => {
+    if (!email) return "Guest";
+    const name = email.split("@")[0];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
 const HomePage = () => {
     const [cameraList, setCameraList] = useState<Camera[]>([]);
     const [currUser, setCurrUser] = useState<null | User>(null);
@@ -59,42 +65,51 @@ const HomePage = () => {
     }, []);
 
     return (
-        <div className="bg-bg w-full h-full flex flex-col">
+        <div className="bg-darkpurple w-full h-full flex flex-col overflow-y-hidden">
             <div className="h-[93%] flex flex-col gap-5">
-                <button className="flex justify-end h-15 items-center bg-primary p-3">
+                <div className="flex justify-between h-15 items-center bg-mediumpurple p-3">
+                    <p className="text-foreground text-lg font-semibold">{currUser?.logged_in ? `Welcome, ${emailToName(currUser?.email)}` : ""}</p>
                     <Link to="/account">
-                        <IconContext.Provider value={{ className: "text-secondary click-effect" }}>
+                        <IconContext.Provider value={{ className: "text-foreground" }}>
                             <MdAccountCircle size={40} />
                         </IconContext.Provider>
                     </Link>
-                </button>
+                </div>
                 <div className="flex flex-col gap-3 p-3 overflow-y-auto h-full">
                     {cameraList.length === 0 ? (
                         <div className="flex justify-center items-center h-full">
-                            <p className="text-secondary font-bold">No cameras available</p>
+                            <p className="text-lighterpurple font-bold tracking-wide">No cameras available</p>
                         </div>
                     ) : !currUser?.logged_in ? (
                         <div className="flex justify-center items-center h-full">
-                            <p className="text-secondary font-bold">Please log in to see the cameras</p>
+                            <p className="text-lighterpurple font-bold tracking-wide">Please log in to see the cameras</p>
                         </div>
                     ) : (
                         cameraList.map((camera) => (
-                            <Link to={`/camera/${camera.id}`} key={camera.id}>
-                                <CameraCard key={camera.id} camera={camera} />
-                            </Link>
+                            <CameraCard
+                                key={camera.id}
+                                camera={camera}
+                                onClick={() => {
+                                    history.pushState({}, "", `/camera/${camera.id}`);
+                                }}
+                            />
                         ))
                     )}
                 </div>
             </div>
-            <div className="h-[7%] bg-primary relative flex items-center justify-center">
-                <button
-                    className="bg-primary cursor-pointer w-15 aspect-square rounded-full mb-15 flex justify-center items-center shadow-[0px_5px_20px_0px_rgba(0,0,0,0.75)] hover:shadow-[0px_3px_10px_0px_rgba(0,0,0,0.75)] click-effect"
-                    disabled={!currUser?.logged_in}
-                >
-                    <IconContext.Provider value={{ className: `${currUser?.logged_in ? "text-secondary" : "text-primary2"} click-effect` }}>
-                        <IoMdAdd size={25} />
-                    </IconContext.Provider>
-                </button>
+            <div className="h-[7%] bg-mediumpurple relative flex items-center justify-center">
+                <Link to={!currUser?.logged_in ? "/" : "discover"}>
+                    <div
+                        className={
+                            "bg-lightblue cursor-pointer w-14 aspect-square rounded-full mb-14 flex justify-center items-center  " +
+                            (currUser?.logged_in ? " click-effect" : "")
+                        }
+                    >
+                        <IconContext.Provider value={{ className: `${currUser?.logged_in ? "text-darkpurple" : "text-lightpurple"}` }}>
+                            <IoMdAdd size={25} />
+                        </IconContext.Provider>
+                    </div>
+                </Link>
             </div>
         </div>
     );

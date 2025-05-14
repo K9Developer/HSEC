@@ -1,17 +1,15 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
 @tailwind utilities;
 
 @layer utilities {
     .click-effect {
-        @apply transition-transform active:scale-97 active:duration-75 active:ease-in;
-    }
-}
+        @apply transition-all duration-150 ease-out shadow-[0px_5px_20px_0px_rgba(0,0,0,0.75)];
 
-@theme {
-    --color-bg: #243642;
-    --color-primary: #387478;
-    --color-primary2: #629584;
-    --color-secondary: #e2f1e7;
+        &:active {
+            @apply shadow-[0px_2px_10px_0px_rgba(0,0,0,0.6)] duration-75 ease-in;
+        }
+    }
 }
 
 :root {
@@ -25,4 +23,8 @@
 #root {
     width: 100vw;
     height: 100vh;
+}
+
+*:focus {
+    outline: none;
 }

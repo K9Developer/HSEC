@@ -12,4 +12,8 @@ export class UserManager {
             session_token: "abc123",
         } as User;
     }
+
+    static logoutUser() { }
+
+    static setLocalUser(user: User) { }
 }
