@@ -43,7 +43,7 @@ const CameraCard = ({ camera, onClick }: Props) => {
                     startingValue={camera.name}
                 />
                 <Button
-                    text="Connect"
+                    text="Rename"
                     className="mt-8 w-full"
                     disabled={currCameraName === camera.name || currCameraName === ""}
                     onClick={() => {
