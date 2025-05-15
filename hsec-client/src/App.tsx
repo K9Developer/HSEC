@@ -4,12 +4,14 @@ import HomePage from "./pages/HomePage.tsx";
 import AccountPage from "./pages/AccountPage.tsx";
 import CameraViewer from "./pages/CameraViewer.tsx";
 import DiscoveryPage from "./pages/DiscoveryPage.tsx";
+import ConnectToServerPage from "./pages/ConnectToServerPage.tsx";
 
 const App = () => {
     return (
         <BrowserRouter>
             <Routes>
                 <Route index element={<HomePage />} />
+                <Route path="connect" element={<ConnectToServerPage />} />
                 <Route path="account" element={<AccountPage />} />
                 <Route path="discover" element={<DiscoveryPage />} />
                 <Route path="camera/:cameraId" element={<CameraViewer />} />

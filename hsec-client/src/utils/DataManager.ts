@@ -2,8 +2,41 @@
 // Include caching and GetCameras will take a bool whether to override the cache
 
 export type DataEvent = "FRAME" | "CAMERA_DISCOVERED" | "CAMERA_PAIRING_SUCCESS" | "CAMERA_PAIRING_FAILURE"
+const SERVER_PORT = 34531
+
+let websocketServer: WebSocket | null = null;
+
+const base64ToIP = (b64: string) => {
+    const binaryStr = atob(b64);
+    if (binaryStr.length !== 4) alert("BAD CODE")
+    const bytes = Array.from(binaryStr, char => char.charCodeAt(0));
+
+    return bytes.join('.');
+}
 
 export class DataManager {
+
+
+    static async connectToServer(serverCode: string, timeout: number): Promise<boolean> {
+        return new Promise<boolean>((resolve, _) => {
+            const ip = base64ToIP(serverCode);
+            websocketServer = new WebSocket(`wss://${ip}:${SERVER_PORT}`)
+            let timer = setTimeout(()=>{
+                resolve(false);
+                websocketServer?.close()
+                websocketServer = null;
+            }, timeout)
+
+            websocketServer.onopen = () => {
+                clearTimeout(timer);
+                resolve(true);
+            }
+        })
+    }
+
+    static isConnected() {
+        return websocketServer != null && websocketServer?.readyState != WebSocket.CLOSED && websocketServer?.readyState != WebSocket.CLOSING
+    }
 
     static async requestSessionToken(email: string, password: string): Promise<{ token: string; id: string }> {
         return new Promise((resolve, reject) => {
