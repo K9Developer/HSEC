@@ -74,6 +74,7 @@ class CameraServer:
             self.__handle_frame,
         )
 
+    @staticmethod
     def __does_match_pattern(data, pattern):
         if len(data) != len(pattern):
             print(f"Data length {len(data)} does not match pattern length {len(pattern)}")
@@ -86,6 +87,7 @@ class CameraServer:
             
         return True
 
+    @staticmethod
     def __handle_template(template, *args):
         if template.count(constants.Options.ANY_VALUE_TEMPLATE) != len(args):
             raise ValueError("Number of arguments does not match the number of template placeholders")
@@ -112,6 +114,9 @@ class CameraServer:
 
     def discover_cameras(self, timeout=-1):
         start = time.time()
+        if self.camera_discover_server.server_socket is None:
+            self.logger.error("Camera discover server socket is None")
+            return
         self.camera_discover_server.server_socket.settimeout(1)
         while self.discovering_cameras and (timeout == -1 or time.time() - start < timeout):
             try:
@@ -168,6 +173,9 @@ class CameraServer:
 
     def __get_camera_by_ip(self, camera_ip):
         for camera in self.connected_cameras.values():
+            if camera.client is None:
+                self.logger.error(f"Camera {camera.mac} client is None")
+                continue
             if camera.client.addr[0] == camera_ip:
                 return camera
         return None
@@ -199,9 +207,12 @@ class CameraServer:
                 return
             
             camera = self.db.get_camera(camera_mac)
+            if camera is None:
+                self.logger.error(f"Camera {camera_mac} not found in database")
+                return
             camera.client = self.__build_camera_client(camera_cli.addr)
             camera.client.transfer_options = constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES
-            camera.client.random = self.db.get_camera(camera_mac).key
+            camera.client.random = camera.key
 
             # TODO: susceptible to replay attacks
             encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair"))

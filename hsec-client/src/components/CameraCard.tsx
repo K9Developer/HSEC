@@ -19,7 +19,7 @@ const CameraCard = ({ camera, onClick }: Props) => {
 
     const renameCamera = (name: string) => {
         // Simulate renaming camera
-        DataManager.renameCamera(camera.id, name);
+        DataManager.renameCamera(camera.mac, name);
         setShowModal(false);
     };
 

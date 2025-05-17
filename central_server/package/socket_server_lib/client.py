@@ -4,7 +4,7 @@ from package.socket_server_lib import constants
 from Cryptodome.Cipher import AES
 
 class SocketClient:
-    def __init__(self, socket: socket.socket, addr: tuple, transfer_options: constants.DataTransferOptions = None, client_thread=None, random=None):
+    def __init__(self, socket: socket.socket | None, addr: tuple, transfer_options: constants.DataTransferOptions | None = None, client_thread=None, random=None):
         self.socket = socket
         self.addr = addr
         self.is_connected = True

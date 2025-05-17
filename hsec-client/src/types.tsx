@@ -1,5 +1,4 @@
 export interface Camera {
-    id: string;
     name: string;
     last_frame: string;
     ip: string;

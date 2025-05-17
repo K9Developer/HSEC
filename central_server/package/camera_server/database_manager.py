@@ -1,6 +1,8 @@
 import sqlite3
 import threading
 
+from central_server.package.socket_server_lib.client import SocketClient
+
 class Camera:
     def __init__(self, mac, name, last_frame, key, red_zone, last_known_ip):
         self.mac = mac
@@ -9,7 +11,7 @@ class Camera:
         self.key = key
         self.red_zone = red_zone
         self.last_known_ip = last_known_ip
-        self.client = None
+        self.client: SocketClient | None = None
 
     def __repr__(self):
         return f"Camera(mac={self.mac}, name={self.name}, last_frame={self.last_frame}, key={self.key})"
