@@ -42,6 +42,11 @@ class CameraDatabase:
         ''')
         conn.commit()
 
+    def remove_camera(self, mac):
+        conn, cursor = self._get_conn()
+        cursor.execute('DELETE FROM cameras WHERE mac = ?', (mac,))
+        conn.commit()
+
     def add_camera(self, mac, name, key, last_known_ip):
         conn, cursor = self._get_conn()
         cursor.execute('''

@@ -11,21 +11,8 @@ from Cryptodome.Cipher import AES
 # TODO: Make the frames sent over UDP
 
 
-class CameraServerCallbacks:
-    def on_camera_discovered(self, camera_addr, camera_mac):
-        raise NotImplementedError("on_camera_discovered method not implemented")
-
-    def on_camera_paired(self, camera_addr, camera_mac):
-        raise NotImplementedError("on_camera_paired method not implemented")
-
-    def on_camera_pairing_failed(self, camera_addr, camera_mac, reason):
-        raise NotImplementedError("on_camera_pairing_failed method not implemented")
-    
-    def on_camera_frame(self, camera_mac, frame):
-        raise NotImplementedError("on_camera_frame method not implemented")
-
 class CameraServer:
-    def __init__(self, callbacks: CameraServerCallbacks, logger=DefaultLogger()):
+    def __init__(self, callbacks: dict, logger=DefaultLogger()):
         self.logger = logger
         self.connected_cameras: dict[str, Camera] = {}
 
@@ -50,7 +37,7 @@ class CameraServer:
         self.callbacks = callbacks
         self.discovering_cameras = True
         self.cameras_awaiting_pairing = set()
-        self.streaming_camera = None
+        self.streaming_cameras = set()
 
         self.db = CameraDatabase()
 
@@ -138,7 +125,7 @@ class CameraServer:
                     continue
 
                 self.logger.info(f"Camera pairing request from {addr} with MAC {camera_mac}")
-                self.callbacks.on_camera_discovered(addr, camera_mac)
+                self.callbacks["on_camera_discovered"](addr, camera_mac)
     
     def pair_camera(self, camera_addr, camera_code):
         self.camera_discover_server.send_data(
@@ -169,7 +156,19 @@ class CameraServer:
             self.logger.error(f"Camera {camera_mac} client is None")
             return None
         
-        self.streaming_camera = camera_mac
+        self.streaming_cameras.add(camera_mac)
+    
+    def stop_stream(self, camera_mac):
+        if camera_mac not in self.connected_cameras:
+            self.logger.error(f"Camera {camera_mac} not connected")
+            return None
+        
+        camera = self.connected_cameras[camera_mac]
+        if camera.client is None:
+            self.logger.error(f"Camera {camera_mac} client is None")
+            return None
+        
+        self.streaming_cameras.remove(camera_mac)
 
     def __get_camera_by_ip(self, camera_ip):
         for camera in self.connected_cameras.values():
@@ -197,8 +196,8 @@ class CameraServer:
             return
         
         camera.last_frame = frame
-        if self.streaming_camera == camera.mac:
-            self.callbacks.on_camera_frame(camera.mac, frame)
+        if camera.mac in self.streaming_cameras:
+            self.callbacks["on_camera_frame"](camera.mac, frame)
 
     def __handle_repair_request(self, camera_cli, fields):
         def __handle_repair(camera_mac):
@@ -249,13 +248,13 @@ class CameraServer:
             if not success:
                 self.logger.error("Failed to exchange keys with camera.")
                 self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
-                self.callbacks.on_camera_pairing_failed(camera_cli.addr, camera_mac, "Failed to exchange keys")
+                self.callbacks["on_camera_pairing_failed"](camera_cli.addr, camera_mac, "Failed to exchange keys")
                 return
             
             camera_name = f"HSEC {''.join(camera_mac.decode().split(':')[-3:])}"
             camera = self.db.add_camera(camera_mac, camera_name, camera_cli.random, camera_cli.addr[0])
             self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
-            self.callbacks.on_camera_paired(camera_cli.addr, camera_mac)
+            self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
             camera.client = camera_cli
             self.connected_cameras[camera_mac] = camera
 
