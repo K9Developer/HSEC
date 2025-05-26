@@ -1,67 +1,72 @@
-#include <ETH.h>
-#include <WiFi.h> // Required for event handling
-#include "../lib/logger.h" // Your custom logger
+#include <Arduino.h>
+#include <SPI.h>
+#include <Ethernet.h>
 
-// SPI pins for Waveshare ESP32-S3-ETH
-#define ETH_MISO  12
-#define ETH_MOSI  11
-#define ETH_SCLK  13
-#define ETH_CS    14
-#define ETH_INT   10
-#define ETH_RST   9
+// SPI pins (match your wiring)
+#define PIN_SPI_MISO  12
+#define PIN_SPI_MOSI  11
+#define PIN_SPI_SCLK  13
+#define PIN_SPI_CS    14
 
-#define SPI3_HOST 3  // Needed for ESP32-S3
-
-bool ethConnected = false;
-
-void WiFiEvent(WiFiEvent_t event) {
-  switch (event) {
-    case ARDUINO_EVENT_ETH_START:
-      Logger::info("ETH started");
-      ETH.setHostname("esp32-eth");
-      break;
-    case ARDUINO_EVENT_ETH_CONNECTED:
-      Logger::info("ETH connected");
-      break;
-    case ARDUINO_EVENT_ETH_GOT_IP:
-      Logger::info(std::string("[ETH] IP Address: ") + ETH.localIP().toString().c_str());
-      ethConnected = true;
-      break;
-    case ARDUINO_EVENT_ETH_DISCONNECTED:
-      Logger::info("ETH disconnected");
-      ethConnected = false;
-      break;
-    case ARDUINO_EVENT_ETH_STOP:
-      Logger::info("ETH stopped");
-      ethConnected = false;
-      break;
-    default:
-      break;
-  }
-}
-
-void initEthernet() {
-  Logger::info("Initializing Ethernet...");
-  WiFi.onEvent(WiFiEvent);
-  if (!ETH.begin(ETH_CS, ETH_INT, ETH_RST, SPI3_HOST, ETH_MISO, ETH_MOSI, ETH_SCLK)) {
-    Logger::info("ETH.begin() failed");
-    while (true);
-  }
-
-  while (!ethConnected) {
-    delay(100);
-    Logger::info("Waiting for Ethernet connection...");
-  }
-}
+// Optional: use a real MAC if needed
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x32, 0x01 };
 
 void setup() {
-  delay(4000);  // <-- Your requested delay
-  Logger::begin();
-  Logger::info("Setup started");
-  initEthernet();
+  Serial.begin(115200);
+  delay(4500);
+  Serial.println("\n=== ESP32 + W5500 DHCP DEBUG START ===");
+
+  // Step 1: Init SPI
+  Serial.println("[DEBUG] Initializing SPI...");
+  SPI.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SPI_CS);
+  Ethernet.init(PIN_SPI_CS);  // required on ESP32
+
+  // Step 2: Check SPI manually (optional low-level sanity)
+  Serial.print("[DEBUG] SPI sanity (MISO): ");
+  pinMode(PIN_SPI_MISO, INPUT_PULLUP);
+  delay(10);
+  Serial.println(digitalRead(PIN_SPI_MISO) ? "HIGH" : "LOW");
+
+  // Step 3: Begin Ethernet with DHCP
+  Serial.print("[DEBUG] Calling Ethernet.begin(mac)...\n");
+  int dhcpResult = Ethernet.begin(mac);
+
+  if (dhcpResult == 0) {
+    Serial.println("[ERROR] DHCP failed ❌");
+
+    EthernetHardwareStatus hwStatus = Ethernet.hardwareStatus();
+    EthernetLinkStatus linkStatus = Ethernet.linkStatus();
+
+    Serial.print("[DEBUG] Hardware status: ");
+    switch (hwStatus) {
+      case EthernetNoHardware: Serial.println("No hardware detected"); break;
+      case EthernetW5100:       Serial.println("W5100 detected"); break;
+      case EthernetW5200:       Serial.println("W5200 detected"); break;
+      case EthernetW5500:       Serial.println("W5500 detected ✅"); break;
+      default:                  Serial.println("Unknown"); break;
+    }
+
+    Serial.print("[DEBUG] Link status: ");
+    switch (linkStatus) {
+      case Unknown:  Serial.println("Unknown"); break;
+      case LinkON:   Serial.println("Link is ON ✅"); break;
+      case LinkOFF:  Serial.println("Link is OFF ❌"); break;
+    }
+
+    Serial.println("[DEBUG] Your W5500 is likely not initialized or not wired correctly.");
+    Serial.println("[DEBUG] Check: power, SPI pinout, pullups, reset, and CS logic.");
+    while (true) delay(1000);
+  }
+
+  // Step 4: DHCP success
+  Serial.println("[SUCCESS] Got IP via DHCP 🎉");
+  Serial.print("IP Address : "); Serial.println(Ethernet.localIP());
+  Serial.print("Subnet Mask: "); Serial.println(Ethernet.subnetMask());
+  Serial.print("Gateway IP : "); Serial.println(Ethernet.gatewayIP());
+  Serial.print("DNS Server : "); Serial.println(Ethernet.dnsServerIP());
 }
 
 void loop() {
-  Logger::info("Looping...");
+  // Nothing in loop — just polling for now
   delay(1000);
 }
