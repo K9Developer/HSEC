@@ -19,8 +19,8 @@ enum DataTransferOptions {
 class SocketTCP {
 private:
     EthernetClient client;
-    char* aesKey;
-    char* aesIV;
+    std::vector<char> aesKey;
+    std::vector<char> aesIV;
     AESLib aes;
 
     std::vector<char> _recv(int bufferSize) {
@@ -35,11 +35,11 @@ private:
         return buffer;
     }
 
-    bool _send(const std::vector<char>& data)      // pass by const-ref; no copy needed
+    bool _send(const std::vector<char>& data)
     {
         if (!client.connected()) return false;
         Logger::debug("Sending ", data.size(), " bytes");
-        client.write(reinterpret_cast<const uint8_t*>(data.data()), data.size());                 // explicit length → binary-safe
+        client.write(reinterpret_cast<const uint8_t*>(data.data()), data.size());
         return true;
     }
 
@@ -63,38 +63,44 @@ private:
         }
         return out;
     }
-
-    std::vector<char> _decrypt_aes(std::vector<char> raw) {
+public:
+    std::vector<char> _decrypt_aes(std::vector<unsigned char> raw) {
         if (raw.empty()) {
             Logger::warning("Decrypt called with empty buffer");
             return {};
         }
 
-        if (this->aesKey == nullptr || this->aesIV == nullptr) {
-            Logger::error("AES key or IV not set – cannot decrypt");
+        if (this->aesKey.empty() || this->aesIV.empty()) {
+            Logger::error("AES key or IV not set - cannot decrypt");
             return {};
         }
 
+        Serial.print("AES KEY: ");
+        Logger::hexDump(this->aesKey);
+
+        Serial.print("AES IV: ");
+        Logger::hexDump(this->aesIV);
+
         std::vector<char> plain(raw.size());
         byte ivCopy[16];
-        memcpy(ivCopy, this->aesIV, 16);
+        memcpy(ivCopy, this->aesIV.data(), 16);
 
         uint16_t decLen = this->aes.decrypt(
             reinterpret_cast<byte *>(raw.data()),
             static_cast<uint16_t>(raw.size()),
             reinterpret_cast<byte *>(plain.data()),
-            reinterpret_cast<const byte *>(this->aesKey),
+            reinterpret_cast<const byte *>(this->aesKey.data()),
             128,
             ivCopy);
 
         if (decLen == 0) {
-            Logger::error("AES decryption failed – check key/IV/length");
+            Logger::error("AES decryption failed - check key/IV/length");
             return {};
         }
 
         uint8_t pad = plain[decLen - 1];
         if (pad == 0 || pad > 16) {
-            Logger::warning("Padding byte invalid – returning raw block");
+            Logger::warning("Padding byte invalid - returning raw block");
             plain.resize(decLen);
             return plain;
         }
@@ -110,8 +116,8 @@ private:
             return {};
         }
 
-        if (this->aesKey == nullptr || this->aesIV == nullptr) {
-            Logger::error("AES key or IV not set – cannot encrypt");
+        if (this->aesKey.empty() || this->aesIV.empty()) {
+            Logger::error("AES key or IV not set - cannot encrypt");
             return {};
         }
 
@@ -122,13 +128,13 @@ private:
 
         std::vector<char> cipher(padded.size());
         byte ivCopy[16];
-        memcpy(ivCopy, this->aesIV, 16);
+        memcpy(ivCopy, this->aesIV.data(), 16);
 
         uint16_t encLen = this->aes.encrypt(
             reinterpret_cast<byte*>(padded.data()),
             static_cast<uint16_t>(padded.size()),
             reinterpret_cast<byte*>(cipher.data()),
-            reinterpret_cast<const byte*>(this->aesKey),
+            reinterpret_cast<const byte*>(this->aesKey.data()),
             128,
             ivCopy);
 
@@ -160,6 +166,17 @@ private:
     }
 
 public:
+    bool setAesData(const char* aesKeyInput, size_t length) {
+        if (length != 32) {
+            Logger::error("AES key must be 32 bytes long!");
+            return false;
+        }
+
+        aesKey.assign(aesKeyInput, aesKeyInput + 32);
+        aesIV.assign(aesKey.begin(), aesKey.begin() + 16);
+    }
+
+
     bool connect(const std::string &ip, uint16_t port) {
         IPAddress ipobj;
         if (!ipobj.fromString(ip.c_str())) {
@@ -189,12 +206,12 @@ public:
                 return {};
             }
 
-            if (this->aesKey == nullptr || this->aesIV == nullptr) {
+            if (this->aesKey.empty() || this->aesIV.empty()) {
                 Logger::error("The AES key or the AES IV is not set. Cannot recv with the AES flag.");
                 return {};
             }
 
-            return this->_decrypt_aes(raw);
+            return this->_decrypt_aes(std::vector<unsigned char>(raw.begin(), raw.end()));
         } else {
             return raw;
         }
