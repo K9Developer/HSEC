@@ -109,7 +109,6 @@ class CameraServer:
             try:
                 data, addr = self.camera_discover_server.server_socket.recvfrom(1024)
                 data = data.split(constants.Options.MESSAGE_SEPARATOR)
-                print(f"Received data: {data}", CameraServer.__does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY))
             except socket.timeout:
                 continue
 

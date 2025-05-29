@@ -1,0 +1,61 @@
+#include <SPI.h>
+#include <Ethernet.h>
+#include <EthernetUdp.h>
+
+// MAC address must be unique on your network
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+
+EthernetUDP Udp;
+unsigned int localPort = 8888;
+char packetBuffer[255];  // Buffer for incoming packets
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);  // wait for serial if needed
+
+  Serial.println("Starting Ethernet...");
+
+  // Start Ethernet with DHCP
+  if (Ethernet.begin(mac) == 0) {
+    Serial.println("Failed to configure Ethernet using DHCP");
+    // fallback to static IP (optional)
+    Ethernet.begin(mac, IPAddress(192, 168, 1, 77));
+  }
+
+  Serial.print("My IP: ");
+  Serial.println(Ethernet.localIP());
+
+  // Start UDP
+  Udp.begin(localPort);
+  Serial.print("Listening on UDP port ");
+  Serial.println(localPort);
+}
+
+void loop() {
+  int packetSize = Udp.parsePacket();
+  if (packetSize) {
+    Serial.print("Received packet of size ");
+    Serial.println(packetSize);
+    Serial.print("From ");
+    IPAddress remote = Udp.remoteIP();
+    for (int i = 0; i < 4; i++) {
+      Serial.print(remote[i], DEC);
+      if (i < 3) Serial.print(".");
+    }
+    Serial.print(", port ");
+    Serial.println(Udp.remotePort());
+
+    // Read packet into buffer
+    int len = Udp.read(packetBuffer, 254);
+    if (len > 0) packetBuffer[len] = '\0';
+    Serial.print("Contents: ");
+    Serial.println(packetBuffer);
+
+    // Echo back the same message
+    Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
+    Udp.write(packetBuffer);
+    Udp.endPacket();
+  }
+
+  delay(10);  // small delay for stability
+}

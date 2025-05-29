@@ -5,6 +5,9 @@
 // Board Data
 #define SERIAL_BAUD_RATE 115200
 
+// Network Data
+#define MESSAGE_SIZE_BYTE_LENGTH 4
+
 // Pins
 #define PIN__ETH_SPI_MISO   12   // Master-In / Slave-Out
 #define PIN__ETH_SPI_MOSI   11   // Master-Out / Slave-In
