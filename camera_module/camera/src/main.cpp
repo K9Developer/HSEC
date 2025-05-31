@@ -1,64 +1,43 @@
-#include "network_manager/socket.h"
-#include "network_manager/network_manager.h"
-#include "logger/logger.h"
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-SocketTCP* s ;
+/*
+  AES-256/CBC demo  —  suculent/AESLib
+  Encrypts a short message, then decrypts it back.
 
+  ⚠  SECURITY NOTE
+  Re-using part of the key as the IV is **not** recommended in real systems.
+  It’s done here only because the exercise requires it.
+*/
 
-static std::vector<char> k = {0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02};
-static std::vector<unsigned char> c = {0x57, 0x02, 0xa3, 0xb7, 0x03, 0x30, 0x30, 0x6e, 0x9c, 0x7e, 0x28, 0x6d, 0xfe, 0x5c, 0x30, 0xf0, 0x56, 0xad, 0x56, 0x70, 0x68, 0x4a, 0x3e, 0x14, 0x7f, 0x1d, 0xf2, 0x5e, 0x63, 0x3b, 0xfc, 0x67};
-
-
-// std::vector<char> str_to_cvec(std::string s) {
-//     std::vector<char> arr;
-//     arr.reserve(s.size());
-
-//     for(int i = s.size()-1; i >= 0; i--) {
-//         arr.push_back(s[i]);
-//     }
-//     return arr;
-// }
+#include <logger/logger.h>
+#include <encryption_manager/encryption_manager.h>
+// std::vector<uint8_t> to std::vector<char>
+std::vector<char> u8Tochr(std::vector<uint8_t>& arr) {
+    std::vector<char> result(arr.size());
+    std::copy(arr.begin(), arr.end(), result.begin());
+    return result;
+}
 
 void setup() {
-    Serial.begin(115200);
+    delay(5000);
+    Logger::info("Starting AES-256/CBC demo...");
 
-    EthernetManager::begin("cocain", mac);
+    std::vector<uint8_t> key = {'T', 'h', 'i', 's', 'I', 's', 'A', 'S', 'e', 'c', 'r', 'e', 't', 'K', 'e', 'y', 'T', 'h', 'i', 's', 'I', 's', 'A', 'S', 'e', 'c', 'r', 'e', 't', 'K', 'e', 'y'};
+    std::vector<uint8_t> iv = {'T', 'h', 'i', 's', 'I', 's', 'A', 'S', 'e', 'c', 'r', 'e', 't', 'I', 'V', 'V'};
+    std::vector<uint8_t> plaintext = {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!'};
 
-    s = new SocketTCP();
-    s->setAesData(k.data(), 32);
+    Logger::info("KEY LENGTH: ", key.size());
+    Logger::info("IV LENGTH: ", iv.size());
 
-    // const std::string ip = "10.68.121.237";
-    // bool success = s->connect(ip, 12345);
-    //Logger::warning(EthernetManager::ethernetData.localIP);
-    // Logger::warning(success);
+    Logger::hexDump(u8Tochr(plaintext));
+    std::vector<uint8_t> ciphertext = EncryptionManager::encrypt_aes(plaintext, key, iv);
+    Logger::info("Ciphertext:");
+    Logger::hexDump(u8Tochr(ciphertext));
+    std::vector<uint8_t> decrypted = EncryptionManager::decrypt_aes(ciphertext, key, iv);
+    Logger::hexDump(u8Tochr(decrypted));
+    if (decrypted == plaintext) {
+        Logger::info("Decryption successful!");
+    } else {
+        Logger::error("Decryption failed!");
+    }
 }
 
-
-void loop() {
-    Logger::hexDump(s->_decrypt_aes(c));
-    delay(1000);
-    // auto r = s->recv(20, 0);
-    // if (r.size() != 0) {
-    //
-    //     Serial.print("RECIEVE: ");
-    //     for (auto ch: r) {
-    //         Serial.print(ch);
-    //     }
-    //     Serial.println();
-    //     // Serial.print("Sending: ");
-    //     //
-    //     //
-    //     // while (!Serial.available()) {delay(100);}
-    //     //
-    //     // std::vector<char> a;
-    //     // while (Serial.available()) {
-    //     //     auto s = Serial.read();
-    //     //     Serial.print((char)s);
-    //     //     a.push_back((char)s);
-    //     // }
-    //     // Serial.println();
-    //     //
-    //     //
-    //     // s->send(a, 0);
-    // }
-}
+void loop() {}
