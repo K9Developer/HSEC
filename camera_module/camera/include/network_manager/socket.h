@@ -39,27 +39,31 @@ private:
         return buffer;
     }
 
-    bool _send(const std::vector<uint8_t>& data)
-    {
+    bool _send(const uint8_t* data, size_t len) {
         if (!client || !client.connected()) return false;
 
         size_t offset = 0;
 
-        while (offset < data.size()) {
+        while (offset < len) {
             size_t space = client.availableForWrite();
             if (space == 0) {
                 yield(); // better than delay for concurrency
                 continue;
             }
 
-            size_t to_write = std::min(space, data.size() - offset);
-            int written = client.write(data.data() + offset, to_write);
+            size_t to_write = std::min(space, len - offset);
+            int written = client.write(data + offset, to_write);
             if (written <= 0) return false;
 
             offset += written;
         }
 
         return true;
+    }
+
+    bool _send(const std::vector<uint8_t>& data)
+    {
+        return _send(data.data(), data.size());
     }
 
 

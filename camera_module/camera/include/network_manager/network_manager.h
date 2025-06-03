@@ -1,17 +1,11 @@
 #include <string>
 #define ETHERNET_LARGE_BUFFERS
+#define MAX_SOCK_NUM 2
 #include <SPI.h>
 #include <Ethernet.h>
 #include "../logger/logger.h"
-
-// extern "C" {
-// #include <wizchip_conf.h>
-// }
-// static void boostSocketBuf() {
-//     uint8_t tx[8] = {16,0,0,0,0,0,0,0};   // 16 KB TX on S0
-//     uint8_t rx[8] = { 0,0,0,0,0,0,0,0};   // use RX only for ACKs
-//     wizchip_init(tx, rx);
-// }
+#undef SPI_ETHERNET_SETTINGS
+#define SPI_ETHERNET_SETTINGS SPISettings(8000000, MSBFIRST, SPI_MODE0)
 
 struct EthernetData {
     std::string localIP;
@@ -52,6 +46,8 @@ public:
             Logger::error("Failed to get IP from DHCP server!");
             return false;
         }
+        // setSn_TXBUF_SIZE(0, 16);              // 16 KB transmit
+        // setSn_RXBUF_SIZE(0,  1);
 
         ethernetData.localIP = EthernetClass::localIP().toString().c_str();
         ethernetData.gatewayIP = EthernetClass::gatewayIP().toString().c_str();

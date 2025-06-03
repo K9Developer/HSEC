@@ -33,24 +33,17 @@ void setup() {
 }
 
 void loop() {
-    // if (c.capture_frame(frame)) {
-    //     s->send(frame);
-    //     frame_counter++;
-    //     frame_size += frame.size();
-    // }
-    //
-    // unsigned long now = millis();
-    // if (now - fps_timer >= 1000) {
-    //     Logger::info("FPS: ", frame_counter, "avg size: ", frame_size / frame_counter);  // ×2 for 0.5s to 1s estimate
-    //     frame_counter = 0;
-    //     frame_size = 0;
-    //     fps_timer = now;
-    // }
-    unsigned long t0 = millis();
     if (c.capture_frame(frame)) {
-        unsigned long t1 = millis();
         s->send(frame);
-        unsigned long t2 = millis();
-        Logger::info("capture: ", t1 - t0, " ms, send: ", t2 - t1, " ms", ", sending ", frame.size(), " bytes.");
+        frame_counter++;
+        frame_size += frame.size();
+    }
+
+    unsigned long now = millis();
+    if (now - fps_timer >= 1000) {
+        Logger::info("FPS: ", frame_counter, "avg size: ", frame_size / frame_counter);  // ×2 for 0.5s to 1s estimate
+        frame_counter = 0;
+        frame_size = 0;
+        fps_timer = now;
     }
 }

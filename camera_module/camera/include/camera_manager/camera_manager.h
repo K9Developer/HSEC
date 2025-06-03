@@ -12,6 +12,11 @@ private:
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
+    bool ran_init = false;
+    sensor_t *sensor;
+    unsigned long last_capture = 0;
+
+public:
     static camera_config_t get_config() {
         camera_config_t config = {
             .pin_pwdn      = PWDN_GPIO_NUM,
@@ -28,15 +33,15 @@ private:
             .pin_href  = HREF_GPIO_NUM,
             .pin_pclk  = PCLK_GPIO_NUM,
 
-            .xclk_freq_hz  = 20000000,
+            .xclk_freq_hz  = 30000000,
             .ledc_timer    = LEDC_TIMER_0,
             .ledc_channel  = LEDC_CHANNEL_0,
 
             .pixel_format  = PIXFORMAT_JPEG,
-            .frame_size    = FRAMESIZE_HD,
+            .frame_size    = FRAMESIZE_VGA,
 
-            .jpeg_quality  = 30,
-            .fb_count      = 5,
+            .jpeg_quality  = 20,
+            .fb_count      = 3,
             .fb_location   = CAMERA_FB_IN_PSRAM,
             .grab_mode     = CAMERA_GRAB_LATEST
         };
@@ -57,11 +62,6 @@ private:
         return config;
     }
 
-    bool ran_init = false;
-    sensor_t *sensor;
-    unsigned long last_capture = 0;
-
-public:
     static Camera& getInstance() {
         static Camera instance;
         return instance;
