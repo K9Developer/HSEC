@@ -1,12 +1,33 @@
 #ifndef ENCRYPTION_MANAGER_H
 #define ENCRYPTION_MANAGER_H
 
-#include <AESLib.h>
 #include <vector>
-
 #include <AESLib.h>
+#include <uECC.h>
+#include "esp_system.h"
 
-static AESLib aesLib; //  global – keeps padding mode
+static int RNG(uint8_t *dest, unsigned size) {
+    while (size--) {
+        *dest++ = (uint8_t)esp_random();
+    }
+    return 1;
+}
+
+struct ECCInitializer {
+    ECCInitializer() {
+        uECC_set_rng(&RNG);
+    }
+};
+
+static ECCInitializer ecc_init_guard; // call set rng once
+static AESLib aesLib;
+
+struct ECDHResult {
+	const uECC_Curve_t* curve;
+	uint8_t pubkey[40];
+	uint8_t privkey[21];
+    bool success;
+};
 
 class EncryptionManager
 {
@@ -58,6 +79,20 @@ public:
 
         plain.resize(plainLen);
         return plain;
+    }
+
+	static ECDHResult get_ecdh() {
+        auto res = ECDHResult();
+        res.curve = uECC_secp160r1();
+        res.success = uECC_make_key(res.pubkey, res.privkey, res.curve);
+        return res;
+	}
+
+    static bool get_shared_secret(const ECDHResult& own_data, uint8_t other_pub[], uint8_t* out_secret) {
+        if (!uECC_shared_secret(other_pub, own_data.privkey, out_secret, own_data.curve))
+            return false;
+
+        return true;
     }
 };
 

@@ -1,43 +1,49 @@
-/*
-  AES-256/CBC demo  —  suculent/AESLib
-  Encrypts a short message, then decrypts it back.
+#include "logger/logger.h"
+#include "encryption_manager/encryption_manager.h"
 
-  ⚠  SECURITY NOTE
-  Re-using part of the key as the IV is **not** recommended in real systems.
-  It’s done here only because the exercise requires it.
-*/
-
-#include <logger/logger.h>
-#include <encryption_manager/encryption_manager.h>
-// std::vector<uint8_t> to std::vector<char>
-std::vector<char> u8Tochr(std::vector<uint8_t>& arr) {
-    std::vector<char> result(arr.size());
-    std::copy(arr.begin(), arr.end(), result.begin());
-    return result;
+void printSecret(const char* label, const uint8_t* data, size_t len) {
+    Logger::info(label);
+    std::vector<char> hexDump(data, data + len);
+    Logger::hexDump(hexDump);
 }
 
 void setup() {
     delay(5000);
-    Logger::info("Starting AES-256/CBC demo...");
+    Logger::info("STARTING!");
 
-    std::vector<uint8_t> key = {'T', 'h', 'i', 's', 'I', 's', 'A', 'S', 'e', 'c', 'r', 'e', 't', 'K', 'e', 'y', 'T', 'h', 'i', 's', 'I', 's', 'A', 'S', 'e', 'c', 'r', 'e', 't', 'K', 'e', 'y'};
-    std::vector<uint8_t> iv = {'T', 'h', 'i', 's', 'I', 's', 'A', 'S', 'e', 'c', 'r', 'e', 't', 'I', 'V', 'V'};
-    std::vector<uint8_t> plaintext = {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!'};
+    // Generate ECDH key pairs
+    ECDHResult partyA = EncryptionManager::get_ecdh();
+    ECDHResult partyB = EncryptionManager::get_ecdh();
 
-    Logger::info("KEY LENGTH: ", key.size());
-    Logger::info("IV LENGTH: ", iv.size());
-
-    Logger::hexDump(u8Tochr(plaintext));
-    std::vector<uint8_t> ciphertext = EncryptionManager::encrypt_aes(plaintext, key, iv);
-    Logger::info("Ciphertext:");
-    Logger::hexDump(u8Tochr(ciphertext));
-    std::vector<uint8_t> decrypted = EncryptionManager::decrypt_aes(ciphertext, key, iv);
-    Logger::hexDump(u8Tochr(decrypted));
-    if (decrypted == plaintext) {
-        Logger::info("Decryption successful!");
-    } else {
-        Logger::error("Decryption failed!");
+    if (!partyA.success || !partyB.success) {
+        Logger::error("ECDH key generation failed");
+        return;
     }
+
+    Logger::info("Party A public key:");
+    Logger::hexDump(std::vector<char>(partyA.pubkey, partyA.pubkey + sizeof(partyA.pubkey)));
+
+    Logger::info("Party B public key:");
+    Logger::hexDump(std::vector<char>(partyB.pubkey, partyB.pubkey + sizeof(partyB.pubkey)));
+
+    uint8_t shared1[20], shared2[20];
+
+    bool ok1 = EncryptionManager::get_shared_secret(partyA, partyB.pubkey, shared1);
+    bool ok2 = EncryptionManager::get_shared_secret(partyB, partyA.pubkey, shared2);
+
+    if (!ok1 || !ok2) {
+        Logger::error("Failed to compute shared secrets");
+        return;
+    }
+
+    printSecret("Shared secret 1 (A → B):", shared1, sizeof(shared1));
+    printSecret("Shared secret 2 (B → A):", shared2, sizeof(shared2));
+
+    bool match = memcmp(shared1, shared2, sizeof(shared1)) == 0;
+    if (match)
+        Logger::info("Shared secrets MATCH");
+    else
+        Logger::error("Shared secrets MISMATCH");
 }
 
 void loop() {}
