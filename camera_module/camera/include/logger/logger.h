@@ -7,10 +7,6 @@
 #include <string>
 #include "constants.h"
 
-#ifdef debug
-  #undef debug
-#endif
-
 static bool serialInitialized = false;
 
 class Logger {

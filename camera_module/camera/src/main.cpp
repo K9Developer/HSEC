@@ -1,49 +1,33 @@
-#include "logger/logger.h"
-#include "encryption_manager/encryption_manager.h"
-
-void printSecret(const char* label, const uint8_t* data, size_t len) {
-    Logger::info(label);
-    std::vector<char> hexDump(data, data + len);
-    Logger::hexDump(hexDump);
-}
-
+#include <Arduino.h>
+#include "camera_manager/camera_manager.h"
+#include "network_manager/network_manager.h"
+#include "network_manager/socket.h"
+uint8_t mac[6] = { 0xB6, 0x5E, 0x3A, 0xF2, 0x1C, 0x84 };
+Camera& c = Camera::getInstance();
+SocketTCP* s;
 void setup() {
     delay(5000);
-    Logger::info("STARTING!");
+    Serial.begin(115200);
 
-    // Generate ECDH key pairs
-    ECDHResult partyA = EncryptionManager::get_ecdh();
-    ECDHResult partyB = EncryptionManager::get_ecdh();
+    Logger::info("Start");
 
-    if (!partyA.success || !partyB.success) {
-        Logger::error("ECDH key generation failed");
-        return;
-    }
+    EthernetManager::begin("abc", mac);
+    SocketTCP* s = new SocketTCP();
 
-    Logger::info("Party A public key:");
-    Logger::hexDump(std::vector<char>(partyA.pubkey, partyA.pubkey + sizeof(partyA.pubkey)));
+    auto su = s->connect("10.100.102.174", 12345);
+    Logger::info("Connection status: ", su);
+    if (!su) return;
 
-    Logger::info("Party B public key:");
-    Logger::hexDump(std::vector<char>(partyB.pubkey, partyB.pubkey + sizeof(partyB.pubkey)));
+    Logger::info("inniting");
+    Logger::info("success: ", c.init());
+    Logger::info("finish");
 
-    uint8_t shared1[20], shared2[20];
 
-    bool ok1 = EncryptionManager::get_shared_secret(partyA, partyB.pubkey, shared1);
-    bool ok2 = EncryptionManager::get_shared_secret(partyB, partyA.pubkey, shared2);
 
-    if (!ok1 || !ok2) {
-        Logger::error("Failed to compute shared secrets");
-        return;
-    }
-
-    printSecret("Shared secret 1 (A → B):", shared1, sizeof(shared1));
-    printSecret("Shared secret 2 (B → A):", shared2, sizeof(shared2));
-
-    bool match = memcmp(shared1, shared2, sizeof(shared1)) == 0;
-    if (match)
-        Logger::info("Shared secrets MATCH");
-    else
-        Logger::error("Shared secrets MISMATCH");
 }
 
-void loop() {}
+void loop() {
+    auto f = c.capture_frame();
+    s->send(f);
+    Logger::info("captured ", f.size());
+}

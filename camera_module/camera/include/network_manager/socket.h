@@ -8,7 +8,10 @@
 #include <Ethernet.h>
 #include "../constants.h"
 #include <vector>
+#pragma push_macro("debug")
+#undef debug
 #include <AESLib.h>
+#pragma pop_macro("debug")
 #include "../logger/logger.h"
 #include <encryption_manager/encryption_manager.h>
 
@@ -40,7 +43,18 @@ private:
     {
         if (!client.connected()) return false;
         Logger::debug("Sending ", data.size(), " bytes");
-        client.write(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+
+        int total_sent = 0;
+        while (total_sent < data.size()) {
+            int len = std::min(data.size() - total_sent, static_cast<size_t>(DATA_CHUNK_SIZE));
+            client.write(data.data() + total_sent, len);
+            client.flush(); // Squeeze out all the stuff stuck in the buffer 💩
+            Logger::debug(millis());
+            total_sent += DATA_CHUNK_SIZE;
+        }
+        // client.write(data.data(), data.size());
+        // client.flush(); // Squeeze out all the stuff stuck in the buffer 💩
+
         return true;
     }
 
