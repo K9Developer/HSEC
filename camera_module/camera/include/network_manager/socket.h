@@ -4,7 +4,7 @@
 
 #ifndef SOCKET_H
 #define SOCKET_H
-
+// #define SPI_ETHERNET_SETTINGS SPISettings(60'000'000, MSBFIRST, SPI_MODE0)
 #include <Ethernet.h>
 #include "../constants.h"
 #include <vector>
@@ -41,22 +41,27 @@ private:
 
     bool _send(const std::vector<uint8_t>& data)
     {
-        if (!client.connected()) return false;
-        Logger::debug("Sending ", data.size(), " bytes");
+        if (!client || !client.connected()) return false;
 
-        int total_sent = 0;
-        while (total_sent < data.size()) {
-            int len = std::min(data.size() - total_sent, static_cast<size_t>(DATA_CHUNK_SIZE));
-            client.write(data.data() + total_sent, len);
-            client.flush(); // Squeeze out all the stuff stuck in the buffer 💩
-            Logger::debug(millis());
-            total_sent += DATA_CHUNK_SIZE;
+        size_t offset = 0;
+
+        while (offset < data.size()) {
+            size_t space = client.availableForWrite();
+            if (space == 0) {
+                yield(); // better than delay for concurrency
+                continue;
+            }
+
+            size_t to_write = std::min(space, data.size() - offset);
+            int written = client.write(data.data() + offset, to_write);
+            if (written <= 0) return false;
+
+            offset += written;
         }
-        // client.write(data.data(), data.size());
-        // client.flush(); // Squeeze out all the stuff stuck in the buffer 💩
 
         return true;
     }
+
 
     // Big endian
     uint64_t number_from_bytes(const std::vector<uint8_t>& vec) {
@@ -79,6 +84,9 @@ private:
         return out;
     }
 public:
+    SocketTCP() {
+    }
+
     void dumpEthernetStatus()
     {
         switch (Ethernet.hardwareStatus()) {
@@ -169,7 +177,7 @@ public:
         }
 
         if (flags & DataTransferOptions::WITH_SIZE) {
-            Logger::debug("Adding size bytes...");
+            // Logger::debug("Adding size bytes...");
             auto size_bytes = this->number_to_bytes(data.size(), MESSAGE_SIZE_BYTE_LENGTH);
             data.insert(data.begin(), size_bytes.begin(), size_bytes.end());
         }

@@ -1,14 +1,13 @@
 
 // Camera Data
 #define CAMERA_NAME "HSEC_CAM_2233"
-#define MAX_FPS     20
+#define MAX_FPS     60
 
 // Board Data
 #define SERIAL_BAUD_RATE 115200
 
 // Network Data
 #define MESSAGE_SIZE_BYTE_LENGTH 4
-#define DATA_CHUNK_SIZE          2000
 
 // Ethernet Pins / Data
 #define PIN__ETH_SPI_MISO   12   // Master-In / Slave-Out

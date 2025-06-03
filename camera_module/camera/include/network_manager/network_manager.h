@@ -1,8 +1,17 @@
 #include <string>
-#include "constants.h"
+#define ETHERNET_LARGE_BUFFERS
 #include <SPI.h>
 #include <Ethernet.h>
 #include "../logger/logger.h"
+
+// extern "C" {
+// #include <wizchip_conf.h>
+// }
+// static void boostSocketBuf() {
+//     uint8_t tx[8] = {16,0,0,0,0,0,0,0};   // 16 KB TX on S0
+//     uint8_t rx[8] = { 0,0,0,0,0,0,0,0};   // use RX only for ACKs
+//     wizchip_init(tx, rx);
+// }
 
 struct EthernetData {
     std::string localIP;
@@ -35,6 +44,7 @@ public:
         Logger::debug("Initializing SPI...");
         SPI.begin(PIN__ETH_SPI_SCLK, PIN__ETH_SPI_MISO, PIN__ETH_SPI_MOSI, PIN__ETH_SPI_CS);
         EthernetClass::init(PIN__ETH_SPI_CS);
+        // boostSocketBuf();
 
         Logger::debug("Requesting local IP from DHCP server...");
         int dhcpResult = EthernetClass::begin(mac);

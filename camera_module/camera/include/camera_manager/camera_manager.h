@@ -4,6 +4,7 @@
 #include "esp_camera.h"
 #include "Arduino.h"
 #include "../logger/logger.h"
+#include <optional>
 
 class Camera {
 private:
@@ -32,26 +33,26 @@ private:
             .ledc_channel  = LEDC_CHANNEL_0,
 
             .pixel_format  = PIXFORMAT_JPEG,
-            .frame_size    = FRAMESIZE_SVGA,
+            .frame_size    = FRAMESIZE_HD,
 
-            .jpeg_quality  = 12,
-            .fb_count      = 1,
+            .jpeg_quality  = 30,
+            .fb_count      = 5,
             .fb_location   = CAMERA_FB_IN_PSRAM,
-            .grab_mode     = CAMERA_GRAB_WHEN_EMPTY
+            .grab_mode     = CAMERA_GRAB_LATEST
         };
 
 
-        if (config.pixel_format == PIXFORMAT_JPEG) {
-            if (psramFound()) {
-                config.jpeg_quality = 10;
-                config.fb_count = 2;
-                config.grab_mode = CAMERA_GRAB_LATEST;
-            } else {
-                // Limit the frame size when PSRAM is not available
-                config.frame_size = FRAMESIZE_SVGA;
-                config.fb_location = CAMERA_FB_IN_DRAM;
-            }
-        }
+        // if (config.pixel_format == PIXFORMAT_JPEG) {
+        //     if (psramFound()) {
+        //         config.jpeg_quality = 10;
+        //         config.fb_count = 2;
+        //         config.grab_mode = CAMERA_GRAB_LATEST;
+        //     } else {
+        //         // Limit the frame size when PSRAM is not available
+        //         config.frame_size = FRAMESIZE_SVGA;
+        //         config.fb_location = CAMERA_FB_IN_DRAM;
+        //     }
+        // }
 
         return config;
     }
@@ -59,7 +60,6 @@ private:
     bool ran_init = false;
     sensor_t *sensor;
     unsigned long last_capture = 0;
-    std::vector<uint8_t> last_frame;
 
 public:
     static Camera& getInstance() {
@@ -92,27 +92,26 @@ public:
         return true;
     }
 
-    std::vector<uint8_t> capture_frame() {
+    bool capture_frame(std::vector<uint8_t>& out_frame) {
         auto delta = millis() - this->last_capture;
-        if (delta < (1./MAX_FPS)*1000.) {
-            Logger::debug("Skipped frame, lower than FPS. delta: ", delta);
-            return this->last_frame;
+        if (delta < (1. / MAX_FPS) * 1000.) {
+            // Logger::debug("Skipped frame, lower than FPS. delta: ", delta);
+            return false;
         }
 
         camera_fb_t* fb = esp_camera_fb_get();
         if (!fb) {
             Logger::error("Failed to capture a frame!");
-            return this->last_frame;
+            return false;
         }
 
-        last_frame.resize(fb->len);
-        Logger::warning(fb->len);
-        memcpy(last_frame.data(), fb->buf, fb->len);
+        out_frame.resize(fb->len);
+        memcpy(out_frame.data(), fb->buf, fb->len);
 
         this->last_capture = millis();
         esp_camera_fb_return(fb);
 
-        return last_frame;
+        return true;
     }
 };
 
