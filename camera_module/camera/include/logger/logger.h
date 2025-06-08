@@ -16,7 +16,7 @@ public:
     template<typename... Args> static void warning(Args&&... args) { log("WARNING", std::forward<Args>(args)...); }
     template<typename... Args> static void error  (Args&&... args) { log("ERROR",   std::forward<Args>(args)...); }
 
-    static void hexDump(const std::vector<char>& data,
+    static void hexDump(const std::vector<uint8_t>& data,
                         std::size_t bytesPerLine = 16)
     {
         ensureSerial();

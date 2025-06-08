@@ -141,14 +141,14 @@ class SocketServer:
                 return client
         return None
     
-    def __send_raw_bytes(self, client: SocketClient, data: bytes):
+    def __send_raw_bytes(self, client: SocketClient, data: bytes, options):
 
         if not client.is_connected:
             self.logger.error(f"Client {client.addr} is not connected")
             return
         try:
             if self.protocol == constants.ServerProtocol.UDP:
-                if constants.DataTransferOptions.WITH_SIZE in client.transfer_options:
+                if constants.DataTransferOptions.WITH_SIZE in options:
                     client.socket.sendto(data[:constants.Options.MESSAGE_SIZE_BYTE_LENGTH], client.addr)
                     client.socket.sendto(data[constants.Options.MESSAGE_SIZE_BYTE_LENGTH:], client.addr)
                 else:
@@ -203,7 +203,7 @@ class SocketServer:
             modified_data = message_size + modified_data
             self.logger.debug(f"Data size prepended for {client.addr}: {len(modified_data)} bytes")
         
-        self.__send_raw_bytes(client, modified_data)
+        self.__send_raw_bytes(client, modified_data, options)
 
     def __receive_raw_bytes(self, client: SocketClient, size: int) -> bytes:
         if not client.is_connected:

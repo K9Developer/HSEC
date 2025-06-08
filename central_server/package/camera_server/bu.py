@@ -28,7 +28,7 @@ class CameraServer:
         self.logger.info("Scanning for cameras...")
         self.free_talker.broadcast(
             data=b"CAMSCAN-HSEC",
-            target_port=Constants.DISCOVER_CAMERA_QUERY_PORT,
+            target_port=Constants.CAMERA_HEARTBEAT_LISTENER_PORT,
         )
 
         camera_addrs = []

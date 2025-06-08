@@ -2,19 +2,23 @@
 #define ENCRYPTION_MANAGER_H
 
 #include <vector>
-#include <AESLib.h>
 #include <uECC.h>
 #include "esp_system.h"
+#include "mbedtls/aes.h"
 
-static int RNG(uint8_t *dest, unsigned size) {
-    while (size--) {
+static int RNG(uint8_t *dest, unsigned size)
+{
+    while (size--)
+    {
         *dest++ = (uint8_t)esp_random();
     }
     return 1;
 }
 
-struct ECCInitializer {
-    ECCInitializer() {
+struct ECCInitializer
+{
+    ECCInitializer()
+    {
         uECC_set_rng(&RNG);
     }
 };
@@ -22,10 +26,11 @@ struct ECCInitializer {
 static ECCInitializer ecc_init_guard; // call set rng once
 static AESLib aesLib;
 
-struct ECDHResult {
-	const uECC_Curve_t* curve;
-	uint8_t pubkey[40];
-	uint8_t privkey[21];
+struct ECDHResult
+{
+    const uECC_Curve_t *curve;
+    uint8_t pubkey[40];
+    uint8_t privkey[21];
     bool success;
 };
 
@@ -39,56 +44,60 @@ class EncryptionManager
     }
 
 public:
-    static std::vector<uint8_t> encrypt_aes(const std::vector<uint8_t> &plain,
-                                            const std::vector<uint8_t> &key,
-                                            const std::vector<uint8_t> &iv)
+    static std::vector<uint8_t> encrypt_aes(
+        const std::vector<uint8_t> &plain,
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &iv)
     {
+        const size_t block = 16;
+        size_t paddedLen = ((plain.size() + block) / block) * block;
+        std::vector<uint8_t> buf(paddedLen, 0);
+        memcpy(buf.data(), plain.data(), plain.size());
+        uint8_t pad = static_cast<uint8_t>(paddedLen - plain.size());
+        memset(buf.data() + plain.size(), pad, pad);
 
-        use_pkcs7();
-
+        mbedtls_aes_context ctx;
+        mbedtls_aes_init(&ctx);
+        mbedtls_aes_setkey_enc(&ctx, key.data(), 256);
         std::vector<uint8_t> iv_local(iv);
-        std::vector<uint8_t> cipher(cipher_capacity(plain.size()));
+        mbedtls_aes_crypt_cbc(&ctx, MBEDTLS_AES_ENCRYPT,
+                              paddedLen, iv_local.data(),
+                              buf.data(), buf.data());
+        mbedtls_aes_free(&ctx);
 
-        uint16_t encLen = aesLib.encrypt(
-            plain.data(),
-            static_cast<uint16_t>(plain.size()),
-            cipher.data(),
-            key.data(), 256,
-            iv_local.data());
-
-        cipher.resize(encLen);
-        return cipher;
+        return buf;
     }
 
-    static std::vector<uint8_t> decrypt_aes(const std::vector<uint8_t> &cipher,
-                                            const std::vector<uint8_t> &key,
-                                            const std::vector<uint8_t> &iv)
+    static std::vector<uint8_t> decrypt_aes(
+        const std::vector<uint8_t> &cipher,
+        const std::vector<uint8_t> &key,
+        const std::vector<uint8_t> &iv)
     {
-
-        use_pkcs7();
-
+        std::vector<uint8_t> buf(cipher);
+        mbedtls_aes_context ctx;
+        mbedtls_aes_init(&ctx);
+        mbedtls_aes_setkey_dec(&ctx, key.data(), 256);
         std::vector<uint8_t> iv_local(iv);
-        std::vector<uint8_t> plain(cipher.size());
+        mbedtls_aes_crypt_cbc(&ctx, MBEDTLS_AES_DECRYPT,
+                              buf.size(), iv_local.data(),
+                              buf.data(), buf.data());
+        mbedtls_aes_free(&ctx);
 
-        uint16_t plainLen = aesLib.decrypt(
-            const_cast<uint8_t *>(cipher.data()),
-            static_cast<uint16_t>(cipher.size()),
-            plain.data(),
-            key.data(), 256,
-            iv_local.data());
-
-        plain.resize(plainLen);
-        return plain;
+        uint8_t pad = buf.back();
+        buf.resize(buf.size() - pad);
+        return buf;
     }
 
-	static ECDHResult get_ecdh() {
+    static ECDHResult get_ecdh()
+    {
         auto res = ECDHResult();
         res.curve = uECC_secp160r1();
         res.success = uECC_make_key(res.pubkey, res.privkey, res.curve);
         return res;
-	}
+    }
 
-    static bool get_shared_secret(const ECDHResult& own_data, uint8_t other_pub[], uint8_t* out_secret) {
+    static bool get_shared_secret(const ECDHResult &own_data, uint8_t other_pub[], uint8_t *out_secret)
+    {
         if (!uECC_shared_secret(other_pub, own_data.privkey, out_secret, own_data.curve))
             return false;
 

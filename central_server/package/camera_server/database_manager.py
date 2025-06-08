@@ -1,7 +1,7 @@
 import sqlite3
 import threading
 
-from central_server.package.socket_server_lib.client import SocketClient
+from package.socket_server_lib.client import SocketClient
 
 class Camera:
     def __init__(self, mac, name, last_frame, key, red_zone, last_known_ip):

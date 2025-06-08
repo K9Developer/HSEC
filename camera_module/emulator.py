@@ -264,5 +264,3 @@ if __name__ == "__main__":
     camera = Camera()
     while True:
         camera.loop()
-
-# TODO: Figure out if this will actually work, EG: watch tutorials to see it working, then figure out how to code it

@@ -4,7 +4,6 @@
 #include "esp_camera.h"
 #include "Arduino.h"
 #include "../logger/logger.h"
-#include <optional>
 
 class Camera {
 private:
@@ -38,7 +37,7 @@ public:
             .ledc_channel  = LEDC_CHANNEL_0,
 
             .pixel_format  = PIXFORMAT_JPEG,
-            .frame_size    = FRAMESIZE_VGA,
+            .frame_size    = FRAMESIZE_SVGA,
 
             .jpeg_quality  = 20,
             .fb_count      = 3,

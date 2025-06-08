@@ -17,6 +17,7 @@ class SocketServerCallbacks(enum.Enum):
 class DataTransferOptions(enum.Flag):
     WITH_SIZE = enum.auto()
     ENCRYPT_AES = enum.auto()
+    RAW = enum.auto()
 
 class Options:
     MESSAGE_SIZE_BYTE_LENGTH = 4

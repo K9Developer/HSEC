@@ -1,6 +1,6 @@
 import sqlite3
 import threading
-from central_server.package.client_handler_server.constants import SESSION_ID_VALIDITY_DURATION
+from package.client_handler_server.constants import SESSION_ID_VALIDITY_DURATION
 import os
 import datetime
 

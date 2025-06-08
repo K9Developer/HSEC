@@ -19,7 +19,7 @@ class CameraServer:
         # This server listens for camera pairing mode broadcasts
         self.camera_discover_server = SocketServer(
             host="0.0.0.0",
-            port=Constants.DISCOVER_CAMERA_QUERY_PORT,
+            port=Constants.CAMERA_HEARTBEAT_LISTENER_PORT,
             protocol=constants.ServerProtocol.UDP,
             logger=logger,
         )
@@ -49,6 +49,11 @@ class CameraServer:
         self.camera_server.add_custom_message_callback(
             Messages.CAMERA_PAIR_REQUEST,
             self.__handle_pair_request,
+        )
+
+        self.camera_server.add_custom_message_callback(
+            Messages.CAMERA_WRONG_CODE,
+            self.__handle_bad_code,
         )
         
         self.camera_server.add_custom_message_callback(
@@ -130,6 +135,7 @@ class CameraServer:
         self.camera_discover_server.send_data(
             self.__build_camera_client(camera_addr, self.camera_discover_server.server_socket),
             CameraServer.__handle_template(Messages.CAMERA_PAIRING_RESPONSE, Constants.CAMERA_HANDLER_PORT, camera_code),
+            constants.DataTransferOptions.RAW
         )
         self.cameras_awaiting_pairing.add(camera_addr[0])
 
@@ -186,6 +192,24 @@ class CameraServer:
         
         self.logger.info(f"Camera {camera.mac} disconnected")
         del self.connected_cameras[camera.mac]
+
+    def __handle_bad_code(self, camera_cli, fields):
+        if len(fields) != 2:
+            self.logger.error(f"Invalid camera code message: {fields}")
+            return
+        
+        camera_mac = fields[1]
+        if not self.__validate_camera_mac(camera_mac):
+            self.logger.error(f"Invalid camera MAC address: {camera_mac}")
+            return
+        
+        self.logger.warning(f"Sent bad code to camera {camera_mac} at {camera_cli.addr[0]}")
+        if camera_cli.addr[0] in self.cameras_awaiting_pairing:
+            self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
+            self.callbacks["on_camera_pairing_failed"](camera_cli.addr, camera_mac, "Invalid pairing code")
+        else:
+            self.logger.error(f"Camera {camera_mac} is not awaiting pairing, cannot handle bad code")
+            return
 
     def __handle_frame(self, camera_cli, fields):
         frame = constants.Options.MESSAGE_SEPARATOR.join(fields[1:])

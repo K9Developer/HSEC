@@ -1,10 +1,10 @@
 import asyncio
 import websockets
 from websockets.asyncio.server import serve
-from central_server.package.camera_server.camera_server import CameraServer
-from central_server.package.client_handler_server.constants import ResponseStatus
-from central_server.package.client_handler_server.database_manager import UserDatabase
-from central_server.package.socket_server_lib.socket_server import DefaultLogger
+from package.camera_server.camera_server import CameraServer
+from package.client_handler_server.constants import ResponseStatus
+from package.client_handler_server.database_manager import UserDatabase
+from package.socket_server_lib.socket_server import DefaultLogger
 import json
 
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
