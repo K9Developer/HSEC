@@ -7,32 +7,36 @@ import { BiSolidCctv } from "react-icons/bi";
 import Modal from "../components/Modal";
 import Input from "../components/Input";
 import Button from "../components/Button";
+import { useNavigate } from "react-router-dom";
 
 interface CameraDiscoveredType {
     ip: string;
     mac: string;
+    port: number;
 }
 
-const TMP_CAMERA_DATA = [
-    { ip: "10.10.10.1", mac: "00:00:00:00:00:01" },
-    { ip: "10.10.10.2", mac: "00:00:00:00:00:02" },
-    { ip: "10.10.10.3", mac: "00:00:00:00:00:03" },
-];
+// const TMP_CAMERA_DATA = [
+//     { ip: "10.10.10.1", mac: "00:00:00:00:00:01" },
+//     { ip: "10.10.10.2", mac: "00:00:00:00:00:02" },
+//     { ip: "10.10.10.3", mac: "00:00:00:00:00:03" },
+// ];
 
 interface CameraConnectModal {
     camera: CameraDiscoveredType | null;
     show: boolean;
 }
 
+let connectTimeout: number | null = null;
 const DiscoveryPage = () => {
     const [currCameraCode, setCurrCameraCode] = React.useState("");
-    const [cameras, setCameras] = React.useState<CameraDiscoveredType[]>([]);
+    const [cameras, setCameras] = React.useState<{[mac: string]: CameraDiscoveredType}>({});
     const [cameraConnectModal, setCameraConnectModal] = React.useState<CameraConnectModal>({
         camera: null,
         show: false,
     });
     const [expectingCameraPair, setExpectingCameraPair] = React.useState(false);
-
+    const navigate = useNavigate();
+    
     const cameraPairTimeout = () => {
         setExpectingCameraPair(false);
         setCameraConnectModal({ camera: null, show: false });
@@ -42,42 +46,53 @@ const DiscoveryPage = () => {
     const onCameraPairSuccess = (data: any) => {
         console.log("Camera Pair Success", data);
         setExpectingCameraPair(false);
-        history.pushState(null, "", "/");
+        navigate("/");
         setCameraConnectModal({ camera: null, show: false });
+        clearTimeout(connectTimeout!);
         // Handle camera pairing success
     };
 
     const onCameraPairFailure = (data: any) => {
-        console.log("Camera Pair Failure", data);
-        alert("Camera Pairing Failed");
+        clearTimeout(connectTimeout!);
         setExpectingCameraPair(false);
         setCameraConnectModal({ camera: null, show: false });
+        console.log(data)
+        alert("Camera Pairing Failed: " + data.info);
         // Handle camera pairing failure
     };
 
-    const onCameraDiscovered = ({ ip, mac }: CameraDiscoveredType) => {
-        console.log("Camera Discovered", ip, mac);
-        if (cameras.find((camera) => camera.mac === mac)) return;
-        setCameras((prev) => [...prev, { ip, mac }]);
+    const onCameraDiscovered = ({ ip, mac, port }: CameraDiscoveredType) => {
+        console.log("Camera Discovered", ip, mac, cameras);
+        setCameras((prevCameras) => ({
+            ...prevCameras,
+            [mac]: { ip, mac, port },
+        }));
+
     };
 
     const attemptCameraConnect = (camera: CameraDiscoveredType | null, code: string) => {
         if (!camera) return;
         setExpectingCameraPair(true);
-        DataManager.connectToCamera(camera.ip, code);
+        DataManager.pairCamera(camera.ip, camera.port, camera.mac, code).then(
+            (data) => {
+                if (data.success) {
+                    onCameraPairSuccess(data);
+                } else {
+                    onCameraPairFailure(data);
+                }
+            })
+        // DataManager.connectToCamera(camera.ip, code);
     };
 
     useEffect(() => {
-        setTimeout(() => {
-            setCameras(TMP_CAMERA_DATA);
-        }, 1000);
-        DataManager.addEventListener("CAMERA_DISCOVERED", onCameraDiscovered);
-        DataManager.addEventListener("CAMERA_PAIRING_SUCCESS", onCameraPairSuccess);
-        DataManager.addEventListener("CAMERA_PAIRING_FAILURE", onCameraPairFailure);
+        DataManager.addEventListener("camera_discovered", onCameraDiscovered);
+        DataManager.startDiscoverCameras();
         return () => {
-            DataManager.removeEventListener("CAMERA_DISCOVERED", onCameraDiscovered);
-            DataManager.removeEventListener("CAMERA_PAIRING_SUCCESS", onCameraPairSuccess);
-            DataManager.removeEventListener("CAMERA_PAIRING_FAILURE", onCameraPairFailure);
+            DataManager.stopDiscoverCameras();
+            DataManager.removeEventListener("camera_discovered");
+            if (connectTimeout) {
+                clearTimeout(connectTimeout);
+            }
         };
     }, []);
 
@@ -94,8 +109,8 @@ const DiscoveryPage = () => {
                     onClick={() => {
                         if (!cameraConnectModal.camera) return;
                         console.log("Attempting to connect to camera", cameraConnectModal.camera.ip, currCameraCode);
+                        connectTimeout = setTimeout(cameraPairTimeout, 4000);
                         attemptCameraConnect(cameraConnectModal.camera, currCameraCode);
-                        setTimeout(cameraPairTimeout, 4000);
                     }}
                 />
             </Modal>
@@ -108,7 +123,7 @@ const DiscoveryPage = () => {
                 </div>
             </div>
             <div className="flex flex-col gap-3 justify-start h-full mt-2 px-4">
-                {cameras.map((camera, index) => (
+                {Object.values(cameras).map((camera, index) => (
                     <div
                         key={index}
                         className="bg-mediumpurple p-3 rounded-lg flex flex-row gap-5 items-center"

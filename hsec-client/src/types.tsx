@@ -6,7 +6,6 @@ export interface Camera {
 }
 
 export interface User {
-    id: string;
     email: string;
     logged_in: boolean;
     session_token: string | null;
@@ -16,4 +15,15 @@ export interface LoginResponse {
     success: boolean;
     message: string;
     user: User | null;
+}
+
+// ---------
+
+export interface GenericResponse {
+    success: boolean;
+    info: string;
+}
+
+export interface GetCamerasResponse extends GenericResponse {
+    cameras: Camera[];
 }

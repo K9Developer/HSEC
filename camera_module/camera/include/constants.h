@@ -2,13 +2,14 @@
 // Camera Data
 #define CAMERA_NAME "HSEC_CAM_2233"
 #define CAMERA_CODE "1234"
-#define MAX_FPS     60
+#define MAX_FPS     30
 
 // Server Communications
 #define CAMERA_HEARTBEAT_PORT 5000
 
 // Board Data
 #define SERIAL_BAUD_RATE 115200
+#define EEPROM_MAGIC     0xDEADBEEF
 
 // Network Data
 #define MESSAGE_SIZE_BYTE_LENGTH 4
@@ -42,3 +43,6 @@
 #define VSYNC_GPIO_NUM 1
 #define HREF_GPIO_NUM  2
 #define PCLK_GPIO_NUM  39
+
+// Other pins
+#define BOOT_PIN 0

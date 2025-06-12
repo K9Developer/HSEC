@@ -1,13 +1,3 @@
-/**<button
-                className="w-full bg-lightblue font-semibold py-2 rounded-lg click-effect"
-                onClick={() => {
-                    if (currentMode === "login") handleLogin(email, password);
-                    else handleCreateAccount(email, password);
-                }}
-            >
-                {currentMode === "login" ? "Login" : "Create Account"}
-            </button> */
-import React from "react";
 import { PuffLoader } from "react-spinners";
 
 interface Props {

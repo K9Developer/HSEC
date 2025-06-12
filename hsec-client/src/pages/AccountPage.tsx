@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useContext } from "react";
 import type { User } from "../types";
 import { UserManager } from "../utils/AccountManager";
 import { IconContext } from "react-icons";
@@ -8,6 +8,7 @@ import Input from "../components/Input";
 import { Link } from "react-router-dom";
 import { DataManager } from "../utils/DataManager";
 import Button from "../components/Button";
+import UserContext from "../contexts/UserContext";
 
 interface LoggedInProps {
     user: User;
@@ -47,7 +48,7 @@ const LoggedOutPage = ({ onLogin, onCreate }: LoggedOutProps) => {
 
     return (
         <div className="bg-darkpurple h-full w-full flex flex-col items-center justify-center p-8 gap-5">
-            <div className="w-full font-bold text-xl text-foreground text-center">LOGIN</div>
+            <div className="w-full font-bold text-xl text-foreground text-center">{currentMode == "login" ? "LOGIN" : "CREATE ACCOUNT"}</div>
             <Input
                 placeholder="EMAIL"
                 className="w-full"
@@ -92,7 +93,7 @@ const LoggedOutPage = ({ onLogin, onCreate }: LoggedOutProps) => {
 };
 
 const AccountPage = () => {
-    const [user, setUser] = React.useState<null | User>(null);
+    const { user, setUser } = useContext(UserContext);
 
     const handleLogOut = () => {
         UserManager.logoutUser();
@@ -100,9 +101,14 @@ const AccountPage = () => {
     };
 
     const handleLogin = async (email: string, password: string) => {
-        const { token, id } = await DataManager.requestSessionToken(email, password);
+        const { token, success, reason } = await DataManager.passLogin(email, password);
+
+        if (!success) {
+            alert(reason);
+            return;
+        }
+
         const user = {
-            id: id,
             email: email,
             logged_in: true,
             session_token: token,
@@ -112,13 +118,12 @@ const AccountPage = () => {
     };
 
     const handleCreateAccount = async (email: string, password: string) => {
-        const { token, id, success, reason } = await DataManager.createAccount(email, password);
+        const { token, success, reason } = await DataManager.createAccount(email, password);
         if (!success) {
             alert(reason);
             return;
         }
         const user = {
-            id: id,
             email: email,
             logged_in: true,
             session_token: token,
@@ -127,9 +132,6 @@ const AccountPage = () => {
         setUser(user);
     };
 
-    useEffect(() => {
-        setUser(UserManager.getLocalUser());
-    }, []);
     return (
         <div className="flex justify-center items-center h-full bg-darkpurple relative">
             <div className="absolute w-full top-0">

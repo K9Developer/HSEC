@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import websockets
 from websockets.asyncio.server import serve
 from package.camera_server.camera_server import CameraServer
@@ -6,6 +7,8 @@ from package.client_handler_server.constants import ResponseStatus
 from package.client_handler_server.database_manager import UserDatabase
 from package.socket_server_lib.socket_server import DefaultLogger
 import json
+import base64
+import hashlib
 
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
 # TODO: MULTIPLE USERS NEED TO WORK MEANING IN SERVER_CAMERA IT NEEDS TO HAVE A LIST OF STREAMING CAMERAS
@@ -21,11 +24,13 @@ class ClientHandler:
         self.logger = logger
         self.running = False
         self.db = UserDatabase()
+        self.__async_loop = None
         self.camera_server = CameraServer({
-            "on_camera_discovered": self.__on_camera_discovered,
-            "on_camera_paired": self.__on_camera_paired,
-            "on_camera_pairing_failed": self.__on_camera_pairing_failed,
-            "on_camera_frame": self.__on_camera_frame,
+            "on_camera_discovered": lambda *a: self.__call_task(self.__on_camera_discovered, *a),
+            "on_camera_paired": lambda *a: self.__call_task(self.__on_camera_paired, *a),
+            "on_camera_pairing_failed": lambda *a: self.__call_task(self.__on_camera_pairing_failed, *a),
+            "on_camera_repair_failed": lambda *a: self.__call_task(self.__on_camera_pairing_failed, *a),
+            "on_camera_frame": lambda *a: self.__call_task(self.__on_camera_frame, *a),
         })
         
         self.CALLBACK_TABLE = {
@@ -37,172 +42,216 @@ class ClientHandler:
             "rename_camera": self.__rename_camera,
             "unpair_camera": self.__unpair_camera,
             "pair_camera": self.__pair_camera,
+
+            "login_session": self.__handle_session_login,
+            "login_pass": self.__handle_password_login,
+            "signup": self.__handle_signup,
         }
 
-        self.streaming_camera_macs = set()
         self.streaming_transactions = {
             "discover_cameras": [],
             "frame": [],
             "paired_cameras": [],
         }
 
+    def __hash_password(self, password):
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    async def __send_websocket(self, websocket, message):
+        # await websocket.send(message)
+        asyncio.run_coroutine_threadsafe(websocket.send(message), self.loop)
+
+
+    def __call_task(self, coro_fn, *args):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # We're in another thread — no loop running
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(coro_fn(*args))
+            loop.close()
+        else:
+            # Safe to schedule in running loop
+            loop.create_task(coro_fn(*args))
+
     def __remove_transaction(self, stream, transaction_id):
-        for i in range(len(self.streaming_transactions[stream])):
-            if self.streaming_transactions[stream][i][1]["transaction_id"] == transaction_id:
-                self.streaming_transactions[stream].pop(i)
-                break
+        self.streaming_transactions[stream] = list(filter(lambda x: x[1]["transaction_id"] != transaction_id, self.streaming_transactions[stream]))
 
     def __get_response(self, status: str, data, jdata):
-        return {
+        return json.dumps({
             "status": status,
             "data": data,
             "transaction_id": jdata["transaction_id"]
-        }
+        })
 
-    def __on_camera_frame(self, camera, frame):
-        self.logger.info(f"Camera frame received: {camera.mac}")
+    async def __on_camera_frame(self, mac, frame):
         for websocket, jdata in self.streaming_transactions["frame"]:
-            if jdata["mac"] == camera.mac:
-                websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, {"mac": camera.mac, "frame": frame}, jdata)))
-                break
+            if jdata["mac"] == mac:
+                await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "frame": base64.b64encode(frame).decode(), "type": "frame"}, jdata))
 
-    def __on_camera_discovered(self, camera):
-        self.logger.info(f"Camera discovered: {camera.mac}")
+    async def __on_camera_discovered(self, addr, mac):
+        # self.logger.info(f"Camera discovered: {mac} ({self.streaming_transactions["discover_cameras"]})")
         for websocket, jdata in self.streaming_transactions["discover_cameras"]:
-            websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, {"mac": camera.mac, "name": camera.name}, jdata)))
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "ip": addr[0], "port": addr[1], "type": "camera_discovered"}, jdata))
 
-    def __on_camera_pairing_failed(self, camera):
-        self.logger.error(f"Camera pairing failed: {camera.mac}")
+    async def __on_camera_pairing_failed(self, addr, mac, reason):
+        self.logger.error(f"Camera pairing failed: {mac} ({reason})")
         for websocket, jdata in self.streaming_transactions["paired_cameras"]:
-            if jdata["mac"] == camera.mac:
-                websocket.send(json.dumps(self.__get_response(ResponseStatus.ERROR, "Pairing failed", jdata)))
-                self.streaming_transactions["paired_cameras"].remove((websocket, jdata))
+            if jdata["mac"] == mac:
+                await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, reason, jdata))
+                self.__remove_transaction("paired_cameras", jdata["transaction_id"])
 
-    def __on_camera_paired(self, camera):
-        self.logger.info(f"Camera paired: {camera.mac}")
+    async def __on_camera_paired(self, addr, mac):
+        self.logger.info(f"Camera paired: {mac}")
         for websocket, jdata in self.streaming_transactions["paired_cameras"]:
-            if jdata["mac"] == camera.mac:
-                websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, {"mac": camera.mac, "name": camera.name}, jdata)))
-                self.streaming_transactions["paired_cameras"].remove((websocket, jdata))
+            print(jdata, mac, jdata["mac"] == mac)
+            if jdata["mac"] == mac:
+                await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "ip": addr[0]}, jdata))
+                # self.streaming_transactions["paired_cameras"].remove((websocket, jdata))
+                self.__remove_transaction("paired_cameras", jdata["transaction_id"])
+                self.db.add_linked_camera(jdata["email"], mac)
 
-    async def __pair_camera(self, websocket, jdata):
-        mac = jdata["mac"]
-        self.camera_server.pair_camera(mac, jdata["code"])
+    async def __pair_camera(self, websocket, jdata, email):
+        ip = jdata["ip"]
+        port = jdata["port"]
+        self.camera_server.pair_camera((ip, port), jdata["code"])
+        jdata["email"] = email
         self.streaming_transactions["paired_cameras"].append((websocket, jdata))
+        # await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Pairing started", jdata))
 
-    async def __discover_cameras(self, websocket, jdata):
-        if self.current_transaction_id_data_stream:
-            await websocket.send(json.dumps(self.__get_response(ResponseStatus.ERROR, "Another stream is already in progress", jdata)))
-            self.logger.error("Another stream is already in progress")
+    async def __discover_cameras(self, websocket, jdata, _):
+        if jdata["transaction_id"] in [t[1]["transaction_id"] for t in self.streaming_transactions["discover_cameras"]]:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Discovery already in progress", jdata))
             return
-        
+        if len(self.streaming_transactions["discover_cameras"]) == 0:
+            self.camera_server.discover_cameras()
         self.streaming_transactions["discover_cameras"].append((websocket, jdata))
-        self.camera_server.discover_cameras()
-        await websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, "Discovery started", jdata)))
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Discovery started", jdata))
 
-    async def __stop_discovery(self, websocket, jdata):
-        self.camera_server.discovering_cameras = False
-        self.current_transaction_id_data_stream = None
-        await websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, "Discovery stopped", jdata)))
+    async def __stop_discovery(self, websocket, jdata, _):
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Discovery stopped", jdata))
         self.__remove_transaction("discover_cameras", jdata["transaction_id"])
-            
+        if len(self.streaming_transactions["discover_cameras"]) == 0:
+            self.camera_server.discovering_cameras = False
+            self.logger.info("Discovery stopped")
 
-    async def __get_cameras(self, websocket, jdata):
+    async def __get_cameras(self, websocket, jdata, email):
         cameras = self.camera_server.db.get_all_cameras()
-        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": cam.last_frame, "ip": cam.last_known_ip} for cam in cameras]
-        await websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, camera_list, jdata)))
+        linked_cameras = self.db.get_linked_cameras(email)
+        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame).decode(), "ip": cam.last_known_ip} for cam in cameras if cam.mac in linked_cameras]
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, camera_list, jdata))
     
-    async def __stream_camera(self, websocket, jdata):
+    async def __stream_camera(self, websocket, jdata, email):
         mac = jdata["mac"]
-        if mac in self.streaming_camera_macs:
-            await websocket.send(json.dumps(self.__get_response(ResponseStatus.ERROR, "Camera already streaming", jdata)))
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
             return
         
-        self.camera_server.stream_camera(mac)
-        websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, "Camera streaming started", jdata)))
-    
-    async def __stop_stream(self, websocket, jdata):
-        mac = jdata["mac"]
-        if mac not in self.streaming_camera_macs:
-            await websocket.send(json.dumps(self.__get_response(ResponseStatus.ERROR, "Camera not streaming", jdata)))
+        if jdata["transaction_id"] in [t[1]["transaction_id"] for t in self.streaming_transactions["frame"]]:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera already streaming", jdata))
             return
-        
-        self.camera_server.stop_stream(mac)
-        websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, "Camera streaming stopped", jdata)))
-        self.streaming_camera_macs.remove(mac)
+
+        self.streaming_transactions["frame"].append((websocket, jdata))        
+        success = self.camera_server.stream_camera(mac)
+        if not success:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not found or not connected", jdata))
+            self.__remove_transaction("frame", jdata["transaction_id"])
+            return
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera streaming started", jdata))
+    
+    async def __stop_stream(self, websocket, jdata, email):
+        mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
+
+        if jdata["transaction_id"] not in [t[1]["transaction_id"] for t in self.streaming_transactions["frame"]]:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not streaming", jdata))
+            return
+
         self.__remove_transaction("frame", jdata["transaction_id"])
+        camera_streams = len([t for t in self.streaming_transactions["frame"] if t[1]["mac"] == mac])
+        if camera_streams == 0:
+            self.camera_server.stop_stream(mac)
+        
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera streaming stopped", jdata))
 
-    async def __rename_camera(self, websocket, jdata):
+    async def __rename_camera(self, websocket, jdata, email):
         mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            print("Camera not linked:", mac, self.db.get_linked_cameras(email))
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
         new_name = jdata["new_name"]
+        self.logger.info(f"Renaming camera {mac} to {new_name}")
         self.camera_server.db.rename_camera(mac, new_name)
-        await websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, "Camera renamed", jdata)))
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera renamed", jdata))
     
-    async def __unpair_camera(self, websocket, jdata):
+    async def __unpair_camera(self, websocket, jdata, email):
         mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
 
-        self.camera_server.db.remove_camera(mac)
-        camera = self.camera_server.connected_cameras[mac]
-        if camera and camera.client:
-            self.camera_server.camera_server.disconnect_client(camera.client)
-            self.camera_server.connected_cameras.pop(mac, None)
+        # self.camera_server.db.remove_camera(mac)
+        users_using_camera = self.db.get_users_using_camera(mac)
+        if users_using_camera == 0:
+            camera = self.camera_server.connected_cameras[mac]
+            if camera and camera.client:
+                self.camera_server.camera_server.disconnect_client(camera.client)
+                self.camera_server.connected_cameras.pop(mac, None)
+        
+        self.db.remove_linked_camera(email=jdata["email"], camera_mac=mac)
 
-        await websocket.send(json.dumps(self.__get_response(ResponseStatus.SUCCESS, "Camera unpaired", jdata)))
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera unpaired", jdata))
     
-    async def __handle_first_exchange(self, websocket: websockets.ClientConnection):
-        data = await websocket.recv()
-        if not data:
-            self.logger.error("No data received")
-            return False
+    # ---- accoutn stuff ----
 
-        jdata = json.loads(data)
-        if jdata["type"] == "login_session":
-            email = jdata["email"]
-            session_id = jdata["session_id"]
-            if self.db.is_logged_in(email, session_id):
-                self.logger.info(f"User {email} logged in with session ID {session_id}")
-                await websocket.send(json.dumps({"status": "success", "message": ""}))
-                return True
-            else:
-                self.logger.error(f"Invalid session ID for user {email}")
-                await websocket.send(json.dumps({"status": "error", "message": "Invalid session ID"}))
-                return False
-        elif jdata["type"] == "login_pass":
-            email = jdata["email"]
-            password = jdata["password"]
-            success = self.db.is_correct_password(email, password)
-            if not success:
-                self.logger.error(f"Invalid password for user {email}")
-                await websocket.send(json.dumps({"status": "error", "message": "Invalid password"}))
-                return False
-            
-            session_id, expr = self.db.update_session_id(email)
-            self.logger.info(f"User {email} logged in with new session ID {session_id}")
-            await websocket.send(json.dumps({"status": "success", "session_id": session_id, "message": ""}))
-            return True
-        elif jdata["type"] == "signup":
-            email = jdata["email"]
-            password = jdata["password"]
-            if self.db.user_exists(email):
-                self.logger.error(f"User {email} already exists")
-                await websocket.send(json.dumps({"status": "error", "message": "User already exists"}))
-                return False
-            
-            sess, expiry = self.db.add_user(email, password)
-            self.logger.info(f"User {email} signed up with session ID {sess}")
-            await websocket.send(json.dumps({"status": "success", "session_id": sess, "message": ""}))
-            return True
+    async def __handle_password_login(self, websocket, jdata, _):
+        email = jdata["email"]
+        password = jdata["password"] + self.db.get_salt(email)
+        password = self.__hash_password(password)
+        print(f"Password for {email}: {jdata["password"]} + {self.db.get_salt(email)}")
+        success = self.db.is_correct_password(email, password)
+        if not success:
+            self.logger.error(f"Invalid password for user {email}")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "Invalid password" }, jdata))
+            return False, None
+        
+        session_id, expr = self.db.update_session_id(email)
+        self.logger.info(f"User {email} logged in with new session ID {session_id}")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"session_id": session_id, "info": "Logged in successfully"}, jdata))
+        return True, email
+
+    async def __handle_session_login(self, websocket, jdata, _):
+        email = jdata["email"]
+        session_id = jdata["session_id"]
+        if self.db.is_logged_in(email, session_id):
+            self.logger.info(f"User {email} logged in with session ID {session_id}")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"session_id": session_id, "info": "Logged in successfully"}, jdata))
+            return True, email
+        else:
+            self.logger.error(f"Invalid session ID for user {email}")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "Invalid session ID" }, jdata))
+            return False, None
+    
+    async def __handle_signup(self, websocket, jdata, _):
+        email = jdata["email"]
+        password = jdata["password"]
+        if self.db.user_exists(email):
+            self.logger.error(f"User {email} already exists")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "User already exists" }, jdata))
+            return False, None
+        
+        sess, expiry = self.db.add_user(email, password)
+        self.logger.info(f"User {email} signed up with session ID {sess}")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"session_id": sess, "info": "Signed up successfully"}, jdata))
+        return True, email
 
     async def handle_client(self, websocket):
-        try:
-            success = await self.__handle_first_exchange(websocket)
-            if not success:
-                self.logger.error("Failed to handle first exchange")
-                return
-        except Exception as e:
-            self.logger.error(f"Error during first exchange: {e}")
-            return
-
+        self.logger.info("New client connected")
+        email = None
         while self.running:
             try:
                 data = await websocket.recv()
@@ -211,21 +260,56 @@ class ClientHandler:
                     break
 
                 jdata = json.loads(data)
+                if email is None and jdata["type"] in ["login_session", "login_pass", "signup"]:
+                    succ, e = await self.CALLBACK_TABLE[jdata["type"]](websocket, jdata, email)
+                    if not succ:
+                        self.logger.error(f"Failed to handle account command: {jdata['type']}")
+                        continue
+                    
+                    self.logger.info(f"Account command handled successfully: {jdata['type']}")
+                    email = e
+                    continue
+
+                if email is None:
+                    self.logger.error("Email not set, first exchange not completed")
+                    await self.__send_websocket(websocket, json.dumps({"status": "error", "message": "Please login first"}))
+                    continue
+
                 if jdata["type"] in self.CALLBACK_TABLE:
-                    await self.CALLBACK_TABLE[jdata["type"]](websocket, jdata)
+                    await self.CALLBACK_TABLE[jdata["type"]](websocket, jdata, email)
                 else:
                     self.logger.error(f"Unknown command: {jdata['type']}")
             except websockets.ConnectionClosed:
                 self.logger.info("Connection closed")
                 break
-            except Exception as e:
-                self.logger.error(f"Error handling client: {e}")
-                break
+            # except Exception as e:
+            #     self.logger.error(f"Error handling client: {e}")
+                
+
+    def __generate_server_code(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+
+        local_ip_bytes = socket.inet_aton(local_ip)
+        local_ip_base64 = base64.b64encode(local_ip_bytes).decode('utf-8')
+        
+        local_ip_base64 = local_ip_base64.replace('=', '').replace('+', '-').replace('/', '_')
+        return local_ip_base64
 
     async def start_server(self):
+        server_code = self.__generate_server_code()
+        self.logger.info(f"Server code: {server_code}")
         self.running = True
+
+        # ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        # ssl_ctx.load_cert_chain(certfile="./package/client_handler_server/certs/cert.pem", keyfile="./package/client_handler_server/certs/privkey.pem")
+        # self.logger.info("SSL context created")
+
         async with serve(self.handle_client, self.host, self.port) as server:
             self.logger.info(f"Server started on {self.host}:{self.port}")
+            self.loop = asyncio.get_running_loop()
             await server.serve_forever()
 
 if __name__ == "__main__":

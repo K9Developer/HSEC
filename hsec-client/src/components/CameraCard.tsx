@@ -10,17 +10,27 @@ import { DataManager } from "../utils/DataManager";
 
 interface Props {
     camera: Camera;
+    updateCameraList: () => void;
     onClick?: () => void;
 }
 
-const CameraCard = ({ camera, onClick }: Props) => {
+const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
     const [showModal, setShowModal] = React.useState(false);
     const [currCameraName, setCurrCameraCode] = React.useState(camera.name);
 
-    const renameCamera = (name: string) => {
+    const renameCamera = async (name: string) => {
         // Simulate renaming camera
-        DataManager.renameCamera(camera.mac, name);
-        setShowModal(false);
+        DataManager.renameCamera(camera.mac, name).then((res) => {
+            if (res.success) {
+                setShowModal(false);
+                updateCameraList()
+            } else {
+                alert("Failed to rename camera: " + res.info);
+            }
+        }).catch((err) => {
+            console.error("Error renaming camera:", err);
+            alert("An error occurred while renaming the camera.");
+        })
     };
 
     return (

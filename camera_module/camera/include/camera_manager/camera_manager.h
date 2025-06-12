@@ -5,11 +5,11 @@
 #include "Arduino.h"
 #include "../logger/logger.h"
 
-class Camera {
+class CameraManager {
 private:
-    Camera() {}
-    Camera(const Camera&) = delete;
-    Camera& operator=(const Camera&) = delete;
+    CameraManager() {}
+    CameraManager(const CameraManager&) = delete;
+    CameraManager& operator=(const CameraManager&) = delete;
 
     bool ran_init = false;
     sensor_t *sensor;
@@ -37,9 +37,9 @@ public:
             .ledc_channel  = LEDC_CHANNEL_0,
 
             .pixel_format  = PIXFORMAT_JPEG,
-            .frame_size    = FRAMESIZE_SVGA,
+            .frame_size    = FRAMESIZE_VGA,
 
-            .jpeg_quality  = 20,
+            .jpeg_quality  = 12,
             .fb_count      = 3,
             .fb_location   = CAMERA_FB_IN_PSRAM,
             .grab_mode     = CAMERA_GRAB_LATEST
@@ -61,8 +61,8 @@ public:
         return config;
     }
 
-    static Camera& getInstance() {
-        static Camera instance;
+    static CameraManager& getInstance() {
+        static CameraManager instance;
         return instance;
     }
 

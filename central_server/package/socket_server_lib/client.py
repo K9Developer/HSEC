@@ -13,6 +13,7 @@ class SocketClient:
         self.client_thread = client_thread
         self.auto_recv = True
         self.aes_obj = None
+        self.locked = False
         assert len(self.random) == 32, "Random value must be 32 bytes long"
         assert isinstance(self.random, bytes), "Random value must be of type bytes"
     

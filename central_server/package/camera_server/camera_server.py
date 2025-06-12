@@ -6,6 +6,7 @@ from package.camera_server.database_manager import CameraDatabase, Camera
 import threading
 from Cryptodome.Util.Padding import pad, unpad
 from Cryptodome.Cipher import AES
+import time
 
 # TODO: How could we make a re-pair? we need to battle arp spoofing too0
 # TODO: Make the frames sent over UDP
@@ -38,6 +39,7 @@ class CameraServer:
         self.discovering_cameras = True
         self.cameras_awaiting_pairing = set()
         self.streaming_cameras = set()
+        self.last_frame_update_time = {}
 
         self.db = CameraDatabase()
 
@@ -49,11 +51,6 @@ class CameraServer:
         self.camera_server.add_custom_message_callback(
             Messages.CAMERA_PAIR_REQUEST,
             self.__handle_pair_request,
-        )
-
-        self.camera_server.add_custom_message_callback(
-            Messages.CAMERA_WRONG_CODE,
-            self.__handle_bad_code,
         )
         
         self.camera_server.add_custom_message_callback(
@@ -69,12 +66,10 @@ class CameraServer:
     @staticmethod
     def __does_match_pattern(data, pattern):
         if len(data) != len(pattern):
-            print(f"Data length {len(data)} does not match pattern length {len(pattern)}")
             return False
         
         for i in range(len(data)):
             if data[i] != pattern[i] and pattern[i] != constants.Options.ANY_VALUE_TEMPLATE:
-                print(f"Data {data[i]} does not match pattern {pattern[i]}")
                 return False
             
         return True
@@ -105,31 +100,44 @@ class CameraServer:
         )
 
     def discover_cameras(self, timeout=-1):
-        start = time.time()
-        if self.camera_discover_server.server_socket is None:
-            self.logger.error("Camera discover server socket is None")
-            return
-        self.camera_discover_server.server_socket.settimeout(1)
-        while self.discovering_cameras and (timeout == -1 or time.time() - start < timeout):
-            try:
-                data, addr = self.camera_discover_server.server_socket.recvfrom(1024)
-                data = data.split(constants.Options.MESSAGE_SEPARATOR)
-            except socket.timeout:
-                continue
-
-            if CameraServer.__does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY):
-                fields = data
-                if len(fields) != 2:
-                    self.logger.error(f"Invalid camera pairing message: {data}")
+        self.discovering_cameras = True
+        def func():
+            self.logger.info("Starting camera discovery...")
+            start = time.time()
+            if self.camera_discover_server.server_socket is None:
+                self.logger.error("Camera discover server socket is None")
+                return
+            self.camera_discover_server.server_socket.settimeout(1)
+            while self.discovering_cameras and (timeout == -1 or time.time() - start < timeout):
+                try:
+                    data, addr = self.camera_discover_server.server_socket.recvfrom(1024)
+                    data = data.split(constants.Options.MESSAGE_SEPARATOR)
+                except socket.timeout:
                     continue
-
-                camera_mac = fields[1]
-                if not self.__validate_camera_mac(camera_mac):
-                    self.logger.error(f"Invalid camera MAC address: {camera_mac}")
+                except Exception as e:
+                    self.logger.error(f"Error receiving data: {e}")
                     continue
+                
+                print(f"Received data from {addr}: {data}")
 
-                self.logger.info(f"Camera pairing request from {addr} with MAC {camera_mac}")
-                self.callbacks["on_camera_discovered"](addr, camera_mac)
+
+                if CameraServer.__does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY):
+                    fields = data
+                    if len(fields) != 2:
+                        self.logger.error(f"Invalid camera pairing message: {data}")
+                        continue
+
+                    camera_mac = fields[1].decode()
+                    if not self.__validate_camera_mac(camera_mac):
+                        self.logger.error(f"Invalid camera MAC address: {camera_mac}")
+                        continue
+
+                    self.callbacks["on_camera_discovered"](addr, camera_mac)
+                elif CameraServer.__does_match_pattern(data, Messages.CAMERA_WRONG_CODE):
+                    self.__handle_bad_code(self.__build_camera_client(addr, self.camera_discover_server.server_socket), data)
+        t = threading.Thread(target=func, daemon=True)
+        t.start()
+            
     
     def pair_camera(self, camera_addr, camera_code):
         self.camera_discover_server.send_data(
@@ -162,6 +170,7 @@ class CameraServer:
             return None
         
         self.streaming_cameras.add(camera_mac)
+        return True
     
     def stop_stream(self, camera_mac):
         if camera_mac not in self.connected_cameras:
@@ -198,7 +207,7 @@ class CameraServer:
             self.logger.error(f"Invalid camera code message: {fields}")
             return
         
-        camera_mac = fields[1]
+        camera_mac = fields[1].decode()
         if not self.__validate_camera_mac(camera_mac):
             self.logger.error(f"Invalid camera MAC address: {camera_mac}")
             return
@@ -218,12 +227,20 @@ class CameraServer:
             self.logger.error(f"Camera {camera_cli.addr[0]} not found in connected cameras")
             return
         
-        camera.last_frame = frame
         if camera.mac in self.streaming_cameras:
             self.callbacks["on_camera_frame"](camera.mac, frame)
+        
+        if time.time() - self.last_frame_update_time.get(camera.mac, 0) < Constants.STATIC_CAMERA_FRAME_UPDATE_INTERVAL:
+            self.logger.debug(f"Skipping frame update for camera {camera.mac} due to rate limiting")
+            return
+        camera.last_frame = frame
+        self.db.update_camera(camera.mac, frame)
+        self.last_frame_update_time[camera.mac] = time.time()
 
     def __handle_repair_request(self, camera_cli, fields):
         def __handle_repair(camera_mac):
+            camera_cli.auto_recv = False
+            self.logger.info(f"Received repair request from camera {camera_mac} at {camera_cli.addr[0]}")
             if self.db.get_camera(camera_mac) is None:
                 self.logger.error(f"Camera {camera_mac} not found in database")
                 return
@@ -232,28 +249,34 @@ class CameraServer:
             if camera is None:
                 self.logger.error(f"Camera {camera_mac} not found in database")
                 return
-            camera.client = self.__build_camera_client(camera_cli.addr)
+            camera.client = camera_cli
             camera.client.transfer_options = constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES
             camera.client.random = camera.key
 
             # TODO: susceptible to replay attacks
-            encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair"))
+            encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair", AES.block_size))
             self.camera_server.send_data(camera.client, CameraServer.__handle_template(Messages.CAMERA_REPAIR_CONFIRM, encrypted_confirm))
-            data = self.camera_server.receive_data_with_pattern(camera.client, Messages.CAMERA_REPAIR_CONFIRM_ACK, constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES)
+            data = self.camera_server.receive_data_with_pattern(camera.client, Messages.CAMERA_REPAIR_CONFIRM_ACK)
             if data is None:
                 self.logger.error(f"Failed to receive repair confirmation from camera {camera_mac}")
+                self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, "Failed to receive repair confirmation")
+                self.camera_server.disconnect_client(camera.client)
                 return
             
             decrypted_data = unpad(camera.client.get_aes().decrypt(data[1]), AES.block_size)
             if len(data) != 2 or decrypted_data != b"confirm-pair-ack":
                 self.logger.error(f"Invalid repair confirmation message received from camera {camera_mac}")
+                self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, "Invalid repair confirmation message")
+                self.camera_server.disconnect_client(camera.client)
                 return
                 
             self.logger.info(f"Camera {camera_mac} repaired successfully")
+            camera_cli.auto_recv = True
             self.db.update_camera_ip(camera_mac, camera_cli.addr[0])
             self.connected_cameras[camera_mac] = camera
-           
-        thread = threading.Thread(target=__handle_repair, args=(fields[1],))
+            self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
+
+        thread = threading.Thread(target=__handle_repair, args=(fields[1].decode(),))
         thread.daemon = True
         thread.start()
 
@@ -274,14 +297,15 @@ class CameraServer:
                 self.callbacks["on_camera_pairing_failed"](camera_cli.addr, camera_mac, "Failed to exchange keys")
                 return
             
-            camera_name = f"HSEC {''.join(camera_mac.decode().split(':')[-3:])}"
+            camera_name = f"HSEC {''.join(camera_mac.split(':')[-3:])}"
             camera = self.db.add_camera(camera_mac, camera_name, camera_cli.random, camera_cli.addr[0])
             self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
-            self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
             camera.client = camera_cli
             self.connected_cameras[camera_mac] = camera
+            self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
+            self.logger.info(f"Camera {camera_mac} paired successfully with IP {camera_cli.addr[0]}")
 
-        thread = threading.Thread(target=__handle_pair, args=(fields[1],))
+        thread = threading.Thread(target=__handle_pair, args=(fields[1].decode(),))
         thread.daemon = True
         thread.start()
         

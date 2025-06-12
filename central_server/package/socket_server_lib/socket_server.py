@@ -4,8 +4,12 @@ import socket
 import threading
 from package.socket_server_lib.client import SocketClient
 from Cryptodome.PublicKey import ECC
+from Crypto.PublicKey.ECC import EccPoint
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad, unpad
+import inspect
+
+sock_lock = threading.Lock()
 
 class EmptyLogger:
     def info(self, message: str): pass
@@ -13,22 +17,27 @@ class EmptyLogger:
     def debug(self, message: str): pass
     def warning(self, message: str): pass
 
-class DefaultLogger(EmptyLogger):
+import inspect
+
+class DefaultLogger:
+    def _prefix(self):
+        frame = inspect.stack()[2]  # 0: _prefix, 1: error(), 2: caller
+        filename = frame.filename.split("/")[-1]
+        lineno = frame.lineno
+        return f"[{filename}:{lineno}]"
+
     def info(self, message: str):
         print(f"INFO: {message}")
-        pass
-    
+
     def error(self, message: str):
-        print(f"ERROR: {message}")
-        pass
-    
+        print(f"ERROR {self._prefix()}: {message}")
+
     def debug(self, message: str):
-        print(f"DEBUG: {message}")
-        pass
-    
+        pass  # or print(f"DEBUG: {message}")
+
     def warning(self, message: str):
         print(f"WARNING: {message}")
-        pass
+
 
 class SocketServer:
     def __init__(self, host: str = '127.0.0.1', port: int = 8080, accept_buffer: int =1000, protocol: constants.ServerProtocol = constants.ServerProtocol.TCP, logger = None, reserve_port=True):
@@ -211,8 +220,8 @@ class SocketServer:
             return b""
         try:
             data = b""
-            for _ in range(size):
-                chunk = client.socket.recv(1)
+            while len(data) < size:
+                chunk = client.socket.recv(size - len(data))
                 if not chunk:
                     self.logger.error(f"Client {client.addr} disconnected while receiving data")
                     break
@@ -223,28 +232,34 @@ class SocketServer:
         except Exception as e:
             self.logger.error(f"Error receiving raw bytes from {client.addr}: {e}")
             return b""
+        input("etc")
 
     def receive_data(self, client: SocketClient, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE, optional_buffer_size = None) -> list[bytes]:
-        if constants.DataTransferOptions.WITH_SIZE not in options and optional_buffer_size is None:
-            self.logger.error("Buffer size must be specified if WITH_SIZE option is not set")
-            return b""
-        
-        message = None
-        if constants.DataTransferOptions.WITH_SIZE in options:
-            message_size = int.from_bytes(self.__receive_raw_bytes(client, constants.Options.MESSAGE_SIZE_BYTE_LENGTH), 'big')
-            self.logger.debug(f"Message size received from {client.addr}: {message_size} bytes")
-            message = self.__receive_raw_bytes(client, message_size)
-        
-        if message is None:
-            message = self.__receive_raw_bytes(client, optional_buffer_size)
+        # while client.locked: pass
+        # client.locked = True
+        with sock_lock:
+            if constants.DataTransferOptions.WITH_SIZE not in options and optional_buffer_size is None:
+                self.logger.error("Buffer size must be specified if WITH_SIZE option is not set")
+                client.locked = False
+                return b""
+            
+            message = None
+            if constants.DataTransferOptions.WITH_SIZE in options:
+                a = self.__receive_raw_bytes(client, constants.Options.MESSAGE_SIZE_BYTE_LENGTH)
+                message_size = int.from_bytes(a, 'big')
+                self.logger.debug(f"Message size received from {client.addr}: {message_size} bytes")
+                message = self.__receive_raw_bytes(client, message_size)
+            
+            if message is None:
+                message = self.__receive_raw_bytes(client, optional_buffer_size)
 
-        if constants.DataTransferOptions.ENCRYPT_AES in options:
-            cipher = client.get_aes()
-            message = unpad(cipher.decrypt(message), AES.block_size)
-            self.logger.debug(f"Data decrypted with AES for {client.addr}")
-            print("client:", client.random.hex())
-        
-        return message.split(constants.Options.MESSAGE_SEPARATOR)
+            if constants.DataTransferOptions.ENCRYPT_AES in options:
+                cipher = client.get_aes()
+                message = unpad(cipher.decrypt(message), AES.block_size)
+                self.logger.debug(f"Data decrypted with AES for {client.addr}")
+            
+            # client.locked = False
+            return message.split(constants.Options.MESSAGE_SEPARATOR)
 
     def receive_data_with_pattern(self, client: SocketClient, pattern: constants.SocketMessages, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE):
         if not isinstance(pattern, list):
@@ -256,14 +271,19 @@ class SocketServer:
             return None
 
         if len(data) != len(pattern) and not constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
-            return False
+            return None
 
         for i in range(len(pattern)):
             if pattern[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE: break
             if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE and data[i] != pattern[i]:
-                return False
+                return None
 
         return data
+
+    def __import_raw_pubkey(self, raw: bytes, curve='P-256'):
+        x = int.from_bytes(raw[:32], 'big')
+        y = int.from_bytes(raw[32:], 'big')
+        return ECC.construct(curve=curve, point_x=x, point_y=y)
 
     def exchange_aes_key_with_ecdh(self, client: SocketClient):
         """
@@ -277,21 +297,24 @@ class SocketServer:
         client.auto_recv = False
         server_privkey = ECC.generate(curve='P-256')
         server_pubkey = server_privkey.public_key()
-        server_pubkey_bytes = server_pubkey.export_key(format='DER')
+        x = int(server_pubkey.pointQ.x).to_bytes(32, 'big')
+        y = int(server_pubkey.pointQ.y).to_bytes(32, 'big')
+        server_pubkey_bytes = x + y
 
         self.logger.debug(f"Server ECDH public key generated for {client.addr}")
-        print("Sending:", SocketServer.__handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes))
         self.send_data(client, SocketServer.__handle_template(constants.SocketMessages.AesKeyExchange.SERVER_HELLO, server_pubkey_bytes), constants.DataTransferOptions.WITH_SIZE)
-        self.logger.debug(f"Sent server ECDH public key to {client.addr}")
+        self.logger.debug(f"Sent server ECDH public key ({server_pubkey_bytes.hex()})")
 
         client_pubkey = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_HELLO, constants.DataTransferOptions.WITH_SIZE)
         if not client_pubkey:
             self.logger.error(f"Client ECDH public key not received from {client.addr}")
             return False
 
-        client_pubkey_obj = ECC.import_key(constants.Options.MESSAGE_SEPARATOR.join(client_pubkey[3:]))
+        raw_client_pubkey = constants.Options.MESSAGE_SEPARATOR.join(client_pubkey[3:])
+        client_pubkey_obj = self.__import_raw_pubkey(raw_client_pubkey)
         shared_point = server_privkey.d * client_pubkey_obj.pointQ
         shared_secret = int(shared_point.x).to_bytes(32, 'big')
+        self.logger.info("Shared secret:" + shared_secret.hex())
 
         confirm_message = self.receive_data_with_pattern(client, constants.SocketMessages.AesKeyExchange.CLIENT_KEY_CONFIRM, constants.DataTransferOptions.WITH_SIZE)
         if not confirm_message:
@@ -316,12 +339,15 @@ class SocketServer:
 
     def match_message(self, data: list[bytes], client: SocketClient) -> callable:
         for pattern, callback in self.message_callbacks.items():
-            if len(data) != len(pattern) and not constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
-                return False
+            if len(data) != len(pattern) and not constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE in pattern:
+                continue
             
             for i in range(len(pattern)):
-                if pattern[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE: break
-                if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE and data[i] != pattern[i]: break
+                if pattern[i] == constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
+                    self.logger.debug(f"Matching message found (via ANY_VALUE_ANY_LENGTH_TEMPLATE) for {client.addr}: {pattern}")
+                    return callback
+                if pattern[i] != constants.Options.ANY_VALUE_TEMPLATE and data[i] != pattern[i]:
+                    break
             else:
                 self.logger.debug(f"Matching message found for {client.addr}: {pattern}")
                 return callback
@@ -332,28 +358,28 @@ class SocketServer:
     def __handle_client(self, client: SocketClient):
         while client.is_connected:
             if not client.auto_recv: continue
-            try:
-                data = self.receive_data(client, client.transfer_options)
-                if not data:
-                    self.logger.info(f"No data received from {client.addr}, disconnecting")
+            # try:
+            data = self.receive_data(client, client.transfer_options)
+            if not data:
+                self.logger.info(f"No data received from {client.addr}, disconnecting")
+                self.disconnect_client(client)
+                break
+
+            self.logger.debug(f"Data received from {client.addr}: {data}")
+            callback = self.match_message(data, client)
+            if callback:
+                self.logger.debug(f"Executing callback ({callback.__name__}) for message from {client.addr}")
+                die = callback(client, data)
+                if die:
+                    self.logger.info(f"Client {client.addr} disconnected due to callback execution")
                     self.disconnect_client(client)
                     break
-
-                self.logger.debug(f"Data received from {client.addr}: {data}")
-                callback = self.match_message(data, client)
-                if callback:
-                    self.logger.debug(f"Executing callback for message from {client.addr}")
-                    die = callback(client, data)
-                    if die:
-                        self.logger.info(f"Client {client.addr} disconnected due to callback execution")
-                        self.disconnect_client(client)
-                        break
-                else:
-                    self.logger.warning(f"No matching callback for message from {client.addr}")
-                    self.__handle_callback(constants.SocketServerCallbacks.UNRECOGNIZED_MESSAGE, client, data)
-            except Exception as e:
-                self.logger.error(f"Error handling client {client.addr}: {e}")
-                self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
+            else:
+                self.logger.warning(f"No matching callback for message from {client.addr}")
+                self.__handle_callback(constants.SocketServerCallbacks.UNRECOGNIZED_MESSAGE, client, data)
+            # except Exception as e:
+            #     self.logger.error(f"Error handling client {client.addr}: {e}")
+            #     self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
 
     def main_loop(self):
         self.logger.info("Entering main loop")

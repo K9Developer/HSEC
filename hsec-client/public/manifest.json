@@ -1,0 +1,24 @@
+{
+    "name": "HSEC Security Systems",
+    "short_name": "HSEC",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#42b883",
+    "lang": "en",
+    "scope": "/",
+    "icons": [
+        {
+        "src": "/hsec.png",
+        "sizes": "512x512",
+        "type": "image/png"
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "screen.png",
+            "sizes": "1280x720",
+            "type": "image/png"
+        }
+    ]
+}

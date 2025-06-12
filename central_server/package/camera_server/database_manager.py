@@ -48,6 +48,8 @@ class CameraDatabase:
         conn.commit()
 
     def add_camera(self, mac, name, key, last_known_ip):
+        mac = mac.decode() if isinstance(mac, bytes) else mac
+
         conn, cursor = self._get_conn()
         cursor.execute('''
             INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone, last_known_ip)
@@ -64,6 +66,8 @@ class CameraDatabase:
 
     def rename_camera(self, mac, new_name):
         conn, cursor = self._get_conn()
+        cursor.execute('SELECT * FROM cameras')
+        print("Before:", type(cursor.fetchone()[0]), mac)
         cursor.execute('UPDATE cameras SET name = ? WHERE mac = ?', (new_name, mac))
         conn.commit()
 

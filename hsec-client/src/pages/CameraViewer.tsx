@@ -1,7 +1,6 @@
-import React, { useEffect } from "react";
-import { useParams } from "react-router-dom";
+import React, { useEffect, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import type { Camera } from "../types";
-import { BASE64 } from "./HomePage";
 import { PuffLoader } from "react-spinners";
 import { IoMdArrowRoundBack } from "react-icons/io";
 import { IconContext } from "react-icons";
@@ -10,37 +9,74 @@ import { DataManager } from "../utils/DataManager";
 const CameraViewer = () => {
     const { cameraId } = useParams();
     const [camera, setCamera] = React.useState<null | Camera>(null);
-    const imageRef = React.useRef<HTMLImageElement>(null);
-    const currentUrl = React.useRef<string | null>(null);
+    const [currentSourceUrl, setCurrentSourceUrl] = React.useState<string>("");
+    const mac = useRef<string | null>(null);
+    const navigate = useNavigate();
+    // const [streaming, setStreaming] = React.useState<boolean>(false);
 
-    const onFrame = (frame: Uint8Array) => {
-        if (!imageRef.current) return;
-        const blob = new Blob([frame], { type: "image/jpeg" });
-        const url = URL.createObjectURL(blob);
-        imageRef.current.src = url;
-
-        if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
-        currentUrl.current = url;
+    const onFrame = (data: any) => {
+        console.log("Received frame from camera:", cameraId);
+        const newSourceUrl = `data:image/jpeg;base64,${data.frame}`;
+        setCurrentSourceUrl(newSourceUrl);
     };
+
+
+    const setupStream = async () => {
+        // if (streaming) {
+        //     console.warn("Stream is already active");
+        //     return;
+        // }
+        if (!cameraId) {
+            console.error("Camera ID is not provided");
+            return;
+        }
+
+        const macAddr = cameraId.match(/.{1,2}/g)?.join(":").toUpperCase();
+        if (!macAddr) {
+            console.error("Invalid camera ID format");
+            return;
+        }
+
+        try {
+            const camerasData = await DataManager.getCameras();
+            const cameraData = camerasData.cameras.find((cam: Camera) => cam.mac.toUpperCase() === macAddr);
+            if (!cameraData) {
+                console.error("Camera not found");
+                return;
+            }
+            setCamera(cameraData);
+            console.log("Camera data (start):", cameraData);
+            // setStreaming(true);
+            let res = await DataManager.startStreamCamera(cameraData.mac);
+            if (!res.success) {
+                console.error("Failed to start camera stream:", res.info);
+                alert("Failed to start camera stream: " + res.info);
+                navigate("/");
+                return;
+            }
+            mac.current = cameraData.mac;
+        } catch (error) {
+            console.error("Error fetching camera data:", error);
+            alert("Failed to fetch camera data. Please try again later.");
+            navigate("/");
+        }
+    }
 
     useEffect(() => {
         // will fetch camera data from the server using cameraId
-        setCamera({
-            id: "3",
-            name: "Camera 3",
-            last_frame: BASE64,
-            ip: "10.100.102.5",
-            mac: "00:00:00:00:00:03",
-        } as Camera);
+        DataManager.addEventListener("frame", onFrame);
+        setupStream();
 
-        DataManager.addEventListener("FRAME", onFrame);
-        return () => DataManager.removeEventListener("FRAME", onFrame);
+        return () => {
+            DataManager.stopStreamCamera(mac.current!);
+            DataManager.removeEventListener("frame");
+        }
     }, []);
 
-    if (!camera) {
+    if (!camera || !currentSourceUrl) {
         return (
-            <div className="flex justify-center items-center h-full bg-bg">
-                <PuffLoader color="#629584" />
+            <div className="flex justify-center items-center h-full bg-darkpurple">
+                <PuffLoader color="#D1CCE0" />
             </div>
         );
     }
@@ -54,13 +90,13 @@ const CameraViewer = () => {
                 </div>
                 <div className="absolute left-5" onClick={() => window.history.back()}>
                     <IconContext.Provider value={{ className: "text-foreground" }}>
-                        <IoMdArrowRoundBack size={30} />{" "}
+                        <IoMdArrowRoundBack size={30} />
                     </IconContext.Provider>
                 </div>
             </div>
             <div className="mt-2 p-2">
                 <div className="rounded-xl bg-lightpurple w-full">
-                    <img ref={imageRef} alt="Live Feed" />
+                    <img src={currentSourceUrl ? currentSourceUrl : undefined} alt="Live Feed" />
                 </div>
             </div>
         </div>

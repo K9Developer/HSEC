@@ -6,6 +6,8 @@
 #include <cctype>
 #include <string>
 #include "constants.h"
+#include <sstream>
+#include <iomanip>
 
 static bool serialInitialized = false;
 
@@ -16,7 +18,14 @@ public:
     template<typename... Args> static void warning(Args&&... args) { log("WARNING", std::forward<Args>(args)...); }
     template<typename... Args> static void error  (Args&&... args) { log("ERROR",   std::forward<Args>(args)...); }
 
-    static void hexDump(const std::vector<uint8_t>& data,
+    static std::string get_hex(const std::vector<uint8_t>& data) {
+        std::ostringstream oss;
+        oss << std::hex << std::setfill('0');
+        for (uint8_t b : data) oss << std::setw(2) << static_cast<int>(b);
+        return oss.str();
+    }
+
+    static void hex_dump(const std::vector<uint8_t>& data,
                         std::size_t bytesPerLine = 16)
     {
         ensureSerial();
