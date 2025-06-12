@@ -1,0 +1,10 @@
+Currently known vulnerabilities:
+
+ - Replay attacks with AES (when confirming key exchange or pairing) - Also possible to figure key out
+ - Possiblity for SQL injection
+ - Camera code is broadcasted (Not enough resources on camera to open secure tunnel for each request)
+
+Todo:
+ - Forgot Password
+ - Red zones
+ - Camera sharing (Everything is there just need UI and a bit of backend)
