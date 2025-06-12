@@ -12,6 +12,7 @@ import { DataManager } from "./utils/DataManager.ts";
 import Button from "./components/Button.tsx";
 import Input from "./components/Input.tsx";
 import Modal from "./components/Modal.tsx";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
 
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
@@ -150,6 +151,7 @@ const App = () => {
                         <Route path="connect" element={<ConnectToServerPage />} />
                         <Route path="account" element={<AccountPage />} />
                         <Route path="discover" element={<DiscoveryPage />} />
+                        <Route path="account/forgot-pass" element={<ForgotPasswordPage />} />
                         <Route path="camera/:cameraId" element={<CameraViewer />} />
                         <Route path="*" element={<div>404 Not Found</div>} />
                     </Routes>

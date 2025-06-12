@@ -5,6 +5,6 @@ Currently known vulnerabilities:
  - Camera code is broadcasted (Not enough resources on camera to open secure tunnel for each request)
 
 Todo:
- - Forgot Password
+ - Forgot Password - DONE
  - Red zones
  - Camera sharing (Everything is there just need UI and a bit of backend)

@@ -4,7 +4,7 @@
 import type { GenericResponse, GetCamerasResponse } from "../types";
 
 export type DataEvent = "frame" | "camera_discovered" | "camera_pairing_success" | "camera_pairing_failure"
-export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session";
+export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password";
 
 const SERVER_PORT = 34531
 
@@ -318,6 +318,34 @@ export class DataManager {
             DataManager.sendRequest("signup", { email, password }, (data) => {
                 if (data.error) resolve({ token: "", success: false, reason: data.error });
                 else resolve({ success: data.status === "success", token: data.data.session_id || "", reason: data.data.info || "" });
+            })
+        });
+    }
+
+    static async requestPasswordReset(email: string): Promise<{ success: boolean; reason: string, timeLeft?: number }> {
+        return new Promise((resolve, reject) => {
+            if (!DataManager.isConnected()) {
+                reject(new Error("Not connected to server"));
+                return;
+            }
+
+            DataManager.sendRequest("request_password_reset", { email }, (data) => {
+                if (data.error) resolve({ success: false, reason: data.error });
+                else resolve({ success: data.status === "success", reason: data.data.info || "", timeLeft: data.data.time_left || 0});
+            })
+        });
+    }
+
+    static async resetPassword(email: string, reset_code: string, new_password: string): Promise<{ success: boolean; reason: string }> {
+        return new Promise((resolve, reject) => {
+            if (!DataManager.isConnected()) {
+                reject(new Error("Not connected to server"));
+                return;
+            }
+
+            DataManager.sendRequest("reset_password", { email, reset_code, new_password }, (data) => {
+                if (data.error) resolve({ success: false, reason: data.error });
+                else resolve({ success: data.status === "success", reason: data.data.info || "" });
             })
         });
     }

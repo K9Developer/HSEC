@@ -2,8 +2,9 @@ import asyncio
 import socket
 import websockets
 from websockets.asyncio.server import serve
+from package.client_handler_server.reset_password_email import send_reset_password_email
 from package.camera_server.camera_server import CameraServer
-from package.client_handler_server.constants import ResponseStatus
+from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, ResponseStatus
 from package.client_handler_server.database_manager import UserDatabase
 from package.socket_server_lib.socket_server import DefaultLogger
 import json
@@ -24,7 +25,6 @@ class ClientHandler:
         self.logger = logger
         self.running = False
         self.db = UserDatabase()
-        self.__async_loop = None
         self.camera_server = CameraServer({
             "on_camera_discovered": lambda *a: self.__call_task(self.__on_camera_discovered, *a),
             "on_camera_paired": lambda *a: self.__call_task(self.__on_camera_paired, *a),
@@ -46,6 +46,9 @@ class ClientHandler:
             "login_session": self.__handle_session_login,
             "login_pass": self.__handle_password_login,
             "signup": self.__handle_signup,
+
+            "request_password_reset": self.__handle_request_password_reset,
+            "reset_password": self.__handle_password_reset,
         }
 
         self.streaming_transactions = {
@@ -139,7 +142,7 @@ class ClientHandler:
     async def __get_cameras(self, websocket, jdata, email):
         cameras = self.camera_server.db.get_all_cameras()
         linked_cameras = self.db.get_linked_cameras(email)
-        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame).decode(), "ip": cam.last_known_ip} for cam in cameras if cam.mac in linked_cameras]
+        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else "").decode(), "ip": cam.last_known_ip} for cam in cameras if cam.mac in linked_cameras]
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, camera_list, jdata))
     
     async def __stream_camera(self, websocket, jdata, email):
@@ -250,6 +253,10 @@ class ClientHandler:
         return True, email
 
     async def handle_client(self, websocket):
+        ACCOUNT_COMMANDS = ["login_session", "login_pass", "signup"]
+        PASSWORD_RESET_COMMANDS = ["request_password_reset", "reset_password"]
+        ALLOWED_QUERIES_WITHOUT_LOGIN = ACCOUNT_COMMANDS + PASSWORD_RESET_COMMANDS
+
         self.logger.info("New client connected")
         email = None
         while self.running:
@@ -260,7 +267,7 @@ class ClientHandler:
                     break
 
                 jdata = json.loads(data)
-                if email is None and jdata["type"] in ["login_session", "login_pass", "signup"]:
+                if email is None and jdata["type"] in ACCOUNT_COMMANDS:
                     succ, e = await self.CALLBACK_TABLE[jdata["type"]](websocket, jdata, email)
                     if not succ:
                         self.logger.error(f"Failed to handle account command: {jdata['type']}")
@@ -269,10 +276,19 @@ class ClientHandler:
                     self.logger.info(f"Account command handled successfully: {jdata['type']}")
                     email = e
                     continue
+                
+                if email is None and jdata["type"] in PASSWORD_RESET_COMMANDS:
+                    await self.CALLBACK_TABLE[jdata["type"]](websocket, jdata, email)
+                    continue
+                
+                # if email is None:
+                #     self.logger.error("Email not set, first exchange not completed")
+                #     await self.__send_websocket(websocket, json.dumps({"status": "error", "message": "Please login first"}))
+                #     continue
 
-                if email is None:
+                if jdata["type"] not in ALLOWED_QUERIES_WITHOUT_LOGIN and email is None:
                     self.logger.error("Email not set, first exchange not completed")
-                    await self.__send_websocket(websocket, json.dumps({"status": "error", "message": "Please login first"}))
+                    await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "Please login first" }, jdata))
                     continue
 
                 if jdata["type"] in self.CALLBACK_TABLE:
@@ -284,7 +300,40 @@ class ClientHandler:
                 break
             # except Exception as e:
             #     self.logger.error(f"Error handling client: {e}")
-                
+    
+    async def __handle_request_password_reset(self, websocket, jdata, _):
+        email = jdata["email"]
+        if not self.db.user_exists(email):
+            self.logger.error(f"User {email} does not exist")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "User does not exist" }, jdata))
+            return
+
+        reset_code = self.db.make_reset_code(email)
+        success = send_reset_password_email(reset_code, email, RESET_CODE_VALIDITY_DURATION, self.logger)
+        if not success:
+            self.logger.error(f"Failed to send reset code email to {email}")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "Failed to send reset code email" }, jdata))
+            return
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, { "info": "Password reset code sent", "time_left": RESET_CODE_VALIDITY_DURATION }, jdata))
+
+    async def __handle_password_reset(self, websocket, jdata, _):
+        email = jdata["email"]
+        reset_code = jdata["reset_code"]
+        new_password = jdata["new_password"]
+
+        if not self.db.user_exists(email):
+            self.logger.error(f"User {email} does not exist")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "User does not exist" }, jdata))
+            return
+
+        if not self.db.is_valid_reset_code(email, reset_code):
+            self.logger.error(f"Invalid reset code for user {email}")
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, { "info": "Invalid reset code" }, jdata))
+            return
+
+        self.db.update_password(email, new_password)
+        self.logger.info(f"Password for user {email} reset successfully")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, { "info": "Password reset successfully" }, jdata))
 
     def __generate_server_code(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

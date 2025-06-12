@@ -1,6 +1,7 @@
+import random
 import sqlite3
 import threading
-from package.client_handler_server.constants import SESSION_ID_VALIDITY_DURATION
+from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, SESSION_ID_VALIDITY_DURATION
 import os
 import datetime
 import hashlib
@@ -35,7 +36,9 @@ class UserDatabase:
                 active_session_id TEXT,
                 session_expiry INTEGER,
                 linked_cameras TEXT DEFAULT '',
-                salt TEXT DEFAULT ''
+                salt TEXT DEFAULT '',
+                reset_code TEXT DEFAULT '',
+                reset_code_expiry INTEGER
             )
         ''')
         conn.commit()
@@ -99,6 +102,14 @@ class UserDatabase:
         conn.commit()
         return sess, expiry
     
+    def update_password(self, email, new_password):
+        conn, cursor = self._get_conn()
+        salt = self.get_salt(email)
+        password_hash = self.__hash_password(new_password, salt)
+        cursor.execute('UPDATE users SET password_hash = ?, salt = ? WHERE email = ?', (password_hash, salt, email))
+        conn.commit()
+        return True
+
     def add_linked_camera(self, email, camera_mac):
         conn, cursor = self._get_conn()
         cursor.execute('SELECT linked_cameras FROM users WHERE email = ?', (email,))
@@ -146,3 +157,20 @@ class UserDatabase:
         if row:
             return True
         return False
+    
+    def make_reset_code(self, email):
+        conn, cursor = self._get_conn()
+        reset_code = random.randint(100000, 999999)
+        reset_code_expiry = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) + RESET_CODE_VALIDITY_DURATION
+        cursor.execute('UPDATE users SET reset_code = ?, reset_code_expiry = ? WHERE email = ?', (reset_code, reset_code_expiry, email))
+        conn.commit()
+        return reset_code
+    
+    def is_valid_reset_code(self, email, reset_code):
+        _, cursor = self._get_conn()
+        cursor.execute('SELECT reset_code FROM users WHERE email = ? AND reset_code = ? AND reset_code_expiry > ?', (email, reset_code, int(datetime.datetime.now(datetime.timezone.utc).timestamp())))
+        row = cursor.fetchone()
+        if row:
+            return True
+        return False
+        
