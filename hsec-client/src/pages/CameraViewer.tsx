@@ -5,16 +5,28 @@ import { PuffLoader } from "react-spinners";
 import { IoMdArrowRoundBack } from "react-icons/io";
 import { IconContext } from "react-icons";
 import { DataManager } from "../utils/DataManager";
+import Button from "../components/Button";
+import { FaShareAlt } from "react-icons/fa";
+import Modal from "../components/Modal";
+import Input from "../components/Input";
 
+
+// Add modal with email
+
+let timeout: null | number = null;
 const CameraViewer = () => {
     const { cameraId } = useParams();
     const [camera, setCamera] = React.useState<null | Camera>(null);
+    const [showShare, setShowShare] = React.useState<boolean>(false);
     const [currentSourceUrl, setCurrentSourceUrl] = React.useState<string>("");
+    const [shareEmail, setShareEmail] = React.useState<string>("");
+    const [loadingShare, setLoadingShare] = React.useState<boolean>(false);
     const mac = useRef<string | null>(null);
     const navigate = useNavigate();
     // const [streaming, setStreaming] = React.useState<boolean>(false);
 
     const onFrame = (data: any) => {
+        if (timeout) clearTimeout(timeout);
         console.log("Received frame from camera:", cameraId);
         const newSourceUrl = `data:image/jpeg;base64,${data.frame}`;
         setCurrentSourceUrl(newSourceUrl);
@@ -67,17 +79,17 @@ const CameraViewer = () => {
         DataManager.addEventListener("frame", onFrame);
         setupStream();
 
-        setTimeout(() => {
-            if (!camera || !currentSourceUrl) {
-                alert("Failed to load camera feed. Please try again later.");
-                navigate("/");
-            }
-        }, 5000);
+           timeout = setTimeout(() => {
+                if (!camera || !currentSourceUrl) {
+                    alert("Failed to load camera feed. Please try again later.");
+                    navigate("/");
+                }
+            }, 5000);
 
         return () => {
             DataManager.stopStreamCamera(mac.current!);
             DataManager.removeEventListener("frame");
-            clearTimeout();
+            if (timeout) clearTimeout(timeout);
         }
     }, []);
 
@@ -91,6 +103,48 @@ const CameraViewer = () => {
 
     return (
         <div className="flex flex-col bg-darkpurple h-full">
+
+            <Modal
+                visible={showShare}
+                onClose={() => setShowShare(false)}
+                showCloseButton={true}
+            >
+
+                <p className="text-foreground text-sm">Please enter the email of the person you want to share the camera to</p>
+                <Input placeholder="Email" onChange={(val: string) => {
+                    setShareEmail(val);
+                    return true;
+                }} pattern={/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/} />
+                <Button
+                    text="Share"
+                    className="mt-8 w-full"
+                    isLoading={loadingShare}
+                    onClick={() => {
+                        if (!shareEmail) {
+                            alert("Please enter a valid email address.");
+                            return;
+                        }
+                        setLoadingShare(true);
+                        DataManager.shareCamera(camera.mac, shareEmail)
+                            .then((res: any) => {
+                                setLoadingShare(false);
+                                if (res.success) {
+                                    alert("Camera shared successfully!");
+                                    setShowShare(false);
+                                } else {
+                                    alert("Failed to share camera: " + res.info);
+                                }
+                            })
+                            .catch((err: any) => {
+                                setLoadingShare(false);
+                                console.error("Error sharing camera:", err);
+                                alert("An error occurred while sharing the camera. Please try again later.");
+                            });
+                    }}
+                />
+
+            </Modal>
+
             <div className="bg-mediumpurple p-4 flex justify-center items-center relative">
                 <div className="flex flex-col justify-between items-center">
                     <p className="text-foreground font-bold">{camera.name}</p>
@@ -102,9 +156,15 @@ const CameraViewer = () => {
                     </IconContext.Provider>
                 </div>
             </div>
-            <div className="mt-2 p-2">
-                <div className="rounded-xl bg-lightpurple w-full">
-                    <img src={currentSourceUrl ? currentSourceUrl : undefined} alt="Live Feed" />
+            <div className="flex flex-col justify-between h-full pb-4 px-2">
+                <div className="mt-2 p-2">
+                    <div className="rounded-xl bg-lightpurple w-full">
+                        <img src={currentSourceUrl ? currentSourceUrl : undefined} alt="Live Feed" />
+                    </div>
+                </div>
+                <div className="w-full px-2 flex flex-row gap-2">
+                    {/* <Button text="Share" className="w-1/2" icon={FaShareAlt} onClick={() => setShowShare(true)} /> */}
+                    <Button text="Share" className="w-full" icon={FaShareAlt} onClick={() => setShowShare(true)} />
                 </div>
             </div>
         </div>

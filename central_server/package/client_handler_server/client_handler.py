@@ -2,7 +2,7 @@ import asyncio
 import socket
 import websockets
 from websockets.asyncio.server import serve
-from package.client_handler_server.reset_password_email import send_reset_password_email
+from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email
 from package.camera_server.camera_server import CameraServer
 from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, ResponseStatus
 from package.client_handler_server.database_manager import UserDatabase
@@ -49,6 +49,8 @@ class ClientHandler:
 
             "request_password_reset": self.__handle_request_password_reset,
             "reset_password": self.__handle_password_reset,
+
+            "share_camera": self.__share_camera,
         }
 
         self.streaming_transactions = {
@@ -177,6 +179,7 @@ class ClientHandler:
         self.__remove_transaction("frame", jdata["transaction_id"])
         camera_streams = len([t for t in self.streaming_transactions["frame"] if t[1]["mac"] == mac])
         if camera_streams == 0:
+            self.logger.info(f"No listeners for camera {mac}, stopping stream")
             self.camera_server.stop_stream(mac)
         
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera streaming stopped", jdata))
@@ -192,6 +195,23 @@ class ClientHandler:
         self.camera_server.db.rename_camera(mac, new_name)
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera renamed", jdata))
     
+    async def __share_camera(self, websocket, jdata, email):
+        mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
+
+        share_email = jdata["email"]
+        if not self.db.user_exists(share_email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "User does not exist", jdata))
+            return
+        
+        self.db.add_linked_camera(email=share_email, camera_mac=mac)
+        self.logger.info(f"Camera {mac} shared with {share_email}, sending email...")
+        send_camera_share_email(email, share_email, mac, self.logger)
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera shared", jdata))
+
+
     async def __unpair_camera(self, websocket, jdata, email):
         mac = jdata["mac"]
         if mac not in self.db.get_linked_cameras(email):

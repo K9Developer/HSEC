@@ -4,7 +4,7 @@
 import type { GenericResponse, GetCamerasResponse } from "../types";
 
 export type DataEvent = "frame" | "camera_discovered" | "camera_pairing_success" | "camera_pairing_failure"
-export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password";
+export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera";
 
 const SERVER_PORT = 34531
 
@@ -270,6 +270,20 @@ export class DataManager {
         })
     }
 
+    static async shareCamera(mac: string, email: string): Promise<GenericResponse> {
+        return new Promise((resolve, _) => {
+            if (!DataManager.isConnected()) {
+                resolve({ success: false, info: "Not connected to server" });
+                return;
+            }
+
+            DataManager.sendRequest("share_camera", { mac, email }, (data) => {
+                if (data.error) resolve({ success: false, info: data.error });
+                else resolve({ success: data.status === "success", info: data.data || "" });
+            });
+        })
+    }
+
     static addEventListener(event: DataEvent, callback: (data: any) => void) {
         DataManager.eventListeners[event] = callback;
     }
@@ -278,6 +292,7 @@ export class DataManager {
         delete DataManager.eventListeners[event];
     }
 
+    
 
     // -----
     static async passLogin(email: string, password: string): Promise<{ token: string; success: boolean; reason: string }> {

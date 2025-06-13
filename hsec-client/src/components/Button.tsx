@@ -6,9 +6,10 @@ interface Props {
     isLoading?: boolean;
     disabled?: boolean;
     className?: string;
+    icon?: React.ElementType; 
 }
 
-const Button = ({ text, onClick, isLoading, disabled, className }: Props) => {
+const Button = ({ text, onClick, isLoading, disabled, className, icon: Icon }: Props) => {
     console.log(disabled);
     return (
         <button
@@ -20,7 +21,10 @@ const Button = ({ text, onClick, isLoading, disabled, className }: Props) => {
                 className
             }
         >
-            {isLoading ? <PuffLoader size={25} /> : text}
+            {isLoading ? <PuffLoader size={25} /> : <div className="flex flex-row gap-3 items-center">
+                {Icon && <Icon/>}
+                {text}
+                </div>}
         </button>
     );
 };
