@@ -194,6 +194,7 @@ class CameraServer:
         return None
 
     def __on_camera_disconnect(self, camera_cli):
+        print(f"Camera {camera_cli.addr[0]} disconnected")
         camera = self.__get_camera_by_ip(camera_cli.addr[0])
         if camera is None:
             self.logger.error(f"Camera {camera_cli.addr[0]} not found in connected cameras")

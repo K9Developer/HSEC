@@ -215,24 +215,28 @@ class SocketServer:
         self.__send_raw_bytes(client, modified_data, options)
 
     def __receive_raw_bytes(self, client: SocketClient, size: int) -> bytes:
-        if not client.is_connected:
-            self.logger.error(f"Client {client.addr} is not connected")
-            return b""
-        try:
-            data = b""
-            while len(data) < size:
-                chunk = client.socket.recv(size - len(data))
-                if not chunk:
-                    self.logger.error(f"Client {client.addr} disconnected while receiving data")
-                    break
-                data += chunk
-          
-            self.logger.debug(f"Received raw bytes from {client.addr}: {len(data)} bytes")
-            return data
-        except Exception as e:
-            self.logger.error(f"Error receiving raw bytes from {client.addr}: {e}")
-            return b""
-        input("etc")
+        client.socket.settimeout(10)
+        def enter():
+            if not client.is_connected:
+                self.logger.error(f"Client {client.addr} is not connected")
+                return b""
+            try:
+                data = b""
+                while len(data) < size:
+                    chunk = client.socket.recv(size - len(data))
+                    if not chunk:
+                        self.logger.error(f"Client {client.addr} disconnected while receiving data")
+                        return b""
+                    data += chunk
+            
+                self.logger.debug(f"Received raw bytes from {client.addr}: {len(data)} bytes")
+                return data
+            except Exception as e:
+                self.logger.error(f"Error receiving raw bytes from {client.addr}: {e}")
+                return b""
+        ret_val = enter()
+        client.socket.settimeout(None)
+        return ret_val
 
     def receive_data(self, client: SocketClient, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE, optional_buffer_size = None) -> list[bytes]:
         # while client.locked: pass
@@ -240,25 +244,31 @@ class SocketServer:
         with sock_lock:
             if constants.DataTransferOptions.WITH_SIZE not in options and optional_buffer_size is None:
                 self.logger.error("Buffer size must be specified if WITH_SIZE option is not set")
-                client.locked = False
-                return b""
+                return None
             
             message = None
             if constants.DataTransferOptions.WITH_SIZE in options:
                 a = self.__receive_raw_bytes(client, constants.Options.MESSAGE_SIZE_BYTE_LENGTH)
+                if not a:
+                    self.logger.error(f"Failed to receive message size from {client.addr}")
+                    return None
                 message_size = int.from_bytes(a, 'big')
                 self.logger.debug(f"Message size received from {client.addr}: {message_size} bytes")
                 message = self.__receive_raw_bytes(client, message_size)
             
             if message is None:
+                print("Before receiving raw bytes")
                 message = self.__receive_raw_bytes(client, optional_buffer_size)
+                print(f"After receiving raw bytes ({len(message)} bytes)")
+            if not message:
+                self.logger.error(f"No data received from {client.addr}")
+                return None
 
             if constants.DataTransferOptions.ENCRYPT_AES in options:
                 cipher = client.get_aes()
                 message = unpad(cipher.decrypt(message), AES.block_size)
                 self.logger.debug(f"Data decrypted with AES for {client.addr}")
             
-            # client.locked = False
             return message.split(constants.Options.MESSAGE_SEPARATOR)
 
     def receive_data_with_pattern(self, client: SocketClient, pattern: constants.SocketMessages, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE):
@@ -268,6 +278,7 @@ class SocketServer:
         data = self.receive_data(client, options)
         if not data:
             self.logger.error(f"No data received from {client.addr}")
+            self.disconnect_client(client)
             return None
 
         if len(data) != len(pattern) and not constants.Options.ANY_VALUE_ANY_LENGTH_TEMPLATE:
@@ -358,33 +369,41 @@ class SocketServer:
     def __handle_client(self, client: SocketClient):
         while client.is_connected:
             if not client.auto_recv: continue
-            # try:
-            data = self.receive_data(client, client.transfer_options)
-            if not data:
-                self.logger.info(f"No data received from {client.addr}, disconnecting")
-                self.disconnect_client(client)
-                break
-
-            self.logger.debug(f"Data received from {client.addr}: {data}")
-            callback = self.match_message(data, client)
-            if callback:
-                self.logger.debug(f"Executing callback ({callback.__name__}) for message from {client.addr}")
-                die = callback(client, data)
-                if die:
-                    self.logger.info(f"Client {client.addr} disconnected due to callback execution")
+            try:
+                data = self.receive_data(client, client.transfer_options)
+                if not data:
+                    self.logger.info(f"No data received from {client.addr}, disconnecting")
                     self.disconnect_client(client)
                     break
-            else:
-                self.logger.warning(f"No matching callback for message from {client.addr}")
-                self.__handle_callback(constants.SocketServerCallbacks.UNRECOGNIZED_MESSAGE, client, data)
+
+                self.logger.debug(f"Data received from {client.addr}: {data}")
+                callback = self.match_message(data, client)
+                if callback:
+                    self.logger.debug(f"Executing callback ({callback.__name__}) for message from {client.addr}")
+                    die = callback(client, data)
+                    if die:
+                        self.logger.info(f"Client {client.addr} disconnected due to callback execution")
+                        self.disconnect_client(client)
+                        break
+                else:
+                    self.logger.warning(f"No matching callback for message from {client.addr}")
+                    self.__handle_callback(constants.SocketServerCallbacks.UNRECOGNIZED_MESSAGE, client, data)
+            except socket.timeout:
+                self.logger.warning(f"Socket timeout while receiving data from {client.addr}")
+                break
+            except Exception as e:
+                self.logger.error(f"Error handling client {client.addr}: {e}")
+                self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
+                break
             # except Exception as e:
             #     self.logger.error(f"Error handling client {client.addr}: {e}")
             #     self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
 
     def main_loop(self):
+          
         self.logger.info("Entering main loop")
         while True:
-            try:
+            # try:
                 client_socket, addr = self.server_socket.accept()
                 self.__handle_callback(constants.SocketServerCallbacks.ON_BEFORE_CONNECT, client_socket, addr)
 
@@ -402,6 +421,6 @@ class SocketServer:
                 self.clients.append(client)
                 self.logger.info(f"Accepted connection from {addr}")
 
-            except Exception as e:
-                self.logger.error(f"Error in main loop: {e}")
-                break
+            # except Exception as e:
+            #     self.logger.error(f"Error in main loop: {e}")
+            #     continue

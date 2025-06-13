@@ -111,7 +111,7 @@ const ForgotPasswordPage = () => {
         awaitingCode ?
             <PasswordResetPage email={email} onSuccess={() => {
                 setAwaitingCode(false);
-                navigate("/account");
+                navigate("/account", { replace: true});
             }} timeLeft={timeRemaining}/>
             :
             <div className="flex flex-col bg-darkpurple h-full">

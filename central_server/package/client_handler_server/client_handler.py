@@ -142,7 +142,8 @@ class ClientHandler:
     async def __get_cameras(self, websocket, jdata, email):
         cameras = self.camera_server.db.get_all_cameras()
         linked_cameras = self.db.get_linked_cameras(email)
-        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else "").decode(), "ip": cam.last_known_ip} for cam in cameras if cam.mac in linked_cameras]
+        connected_cameras = self.camera_server.connected_cameras
+        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else b"").decode(), "ip": cam.last_known_ip, "connected": cam.mac in connected_cameras} for cam in cameras if cam.mac in linked_cameras]
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, camera_list, jdata))
     
     async def __stream_camera(self, websocket, jdata, email):

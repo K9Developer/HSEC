@@ -67,9 +67,17 @@ const CameraViewer = () => {
         DataManager.addEventListener("frame", onFrame);
         setupStream();
 
+        setTimeout(() => {
+            if (!camera || !currentSourceUrl) {
+                alert("Failed to load camera feed. Please try again later.");
+                navigate("/");
+            }
+        }, 5000);
+
         return () => {
             DataManager.stopStreamCamera(mac.current!);
             DataManager.removeEventListener("frame");
+            clearTimeout();
         }
     }, []);
 

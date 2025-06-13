@@ -8,7 +8,7 @@ void setup() {
     pinMode(BOOT_PIN, INPUT_PULLUP);
     EEPROM.begin(sizeof(ServerData) + sizeof(EEPROM_MAGIC));
     delay(3000);
-    Logger::info("OMG STARTING HSEC!!!!")
+    Logger::info("OMG STARTING HSEC!!!!");
     EthernetManager::begin(CAMERA_NAME, mac);
     c = new Camera(mac);
 }

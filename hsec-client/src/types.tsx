@@ -3,6 +3,7 @@ export interface Camera {
     last_frame: string;
     ip: string;
     mac: string;
+    connected?: boolean;
 }
 
 export interface User {

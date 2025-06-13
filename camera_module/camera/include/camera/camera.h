@@ -333,7 +333,6 @@ public:
     }
 
     void steam_camera() {
-        Logger::debug("Sending stream...");
         if (this->camera->capture_frame(this->curr_frame)) {
             auto succ = this->tcp_soc->send(this->_fields_to_bytes(
                 "CAMFRAME-HSEC",

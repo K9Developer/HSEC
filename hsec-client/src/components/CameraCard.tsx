@@ -7,6 +7,7 @@ import Modal from "./Modal";
 import Input from "./Input";
 import Button from "./Button";
 import { DataManager } from "../utils/DataManager";
+import { VscDebugDisconnect } from "react-icons/vsc";
 
 interface Props {
     camera: Camera;
@@ -78,7 +79,13 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
                     </button>
                 </IconContext.Provider>
             </div>
+            <div className="relative">
+                {!camera.connected && 
+                <div className="absolute top-0 left-0 w-full h-full bg-black bg-opacity-60 flex items-center justify-center text-foreground text-8xl">
+                    <VscDebugDisconnect/>
+                </div>}
             <img src={"data:image/png;base64," + camera.last_frame} alt="" className="w-full h-40 " onClick={onClick} />
+            </div>
         </div>
     );
 };

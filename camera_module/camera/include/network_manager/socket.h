@@ -239,7 +239,6 @@ public:
     {
         if (flags & DataTransferOptions::ENCRYPT_AES)
         {
-            Logger::debug("Encrypting data with AES...");
             data = EncryptionManager::encrypt_aes(
                 data,
                 this->aesKey,
@@ -253,7 +252,6 @@ public:
 
         if (flags & DataTransferOptions::WITH_SIZE)
         {
-            Logger::debug("Adding size bytes (", data.size(), " bytes)...");
             auto size_bytes = this->number_to_bytes(data.size(), MESSAGE_SIZE_BYTE_LENGTH);
             data.insert(data.begin(), size_bytes.begin(), size_bytes.end());
         }
