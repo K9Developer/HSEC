@@ -3,6 +3,7 @@ Currently known vulnerabilities:
  - Replay attacks with AES (when confirming key exchange or pairing) - Also possible to figure key out
  - Possiblity for SQL injection
  - Camera code is broadcasted (Not enough resources on camera to open secure tunnel for each request)
+ - No SSL on websocket
 
 Todo:
  - Forgot Password - DONE

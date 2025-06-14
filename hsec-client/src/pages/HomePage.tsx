@@ -50,19 +50,14 @@ const HomePage = () => {
             cameraGetInterval = setInterval(() => {
                 console.log("Refreshing camera list...");
                 getCameras();
-            }, 1000); // Refresh every 5 seconds
+            }, 1000);
         }
         getCameras();
         return () => {if (cameraGetInterval) clearInterval(cameraGetInterval);}
     }, [user])
 
     useEffect(() => {
-        // const interval = setInterval(() => {
-        //     console.log("Refreshing camera list...");
-        //     getCameras();
-        // }, 30000); // Refresh every 5 seconds
-        // getCameras();
-        // return () => clearInterval(interval);
+        getCameras();
     }, [])
 
 

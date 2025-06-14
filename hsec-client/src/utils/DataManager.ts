@@ -3,7 +3,7 @@
 
 import type { GenericResponse, GetCamerasResponse } from "../types";
 
-export type DataEvent = "frame" | "camera_discovered" | "camera_pairing_success" | "camera_pairing_failure"
+export type DataEvent = "frame" | "camera_discovered"
 export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera";
 
 const SERVER_PORT = 34531

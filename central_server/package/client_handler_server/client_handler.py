@@ -123,7 +123,6 @@ class ClientHandler:
         self.camera_server.pair_camera((ip, port), jdata["code"])
         jdata["email"] = email
         self.streaming_transactions["paired_cameras"].append((websocket, jdata))
-        # await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Pairing started", jdata))
 
     async def __discover_cameras(self, websocket, jdata, _):
         if jdata["transaction_id"] in [t[1]["transaction_id"] for t in self.streaming_transactions["discover_cameras"]]:
@@ -288,7 +287,7 @@ class ClientHandler:
                     break
 
                 jdata = json.loads(data)
-                if email is None and jdata["type"] in ACCOUNT_COMMANDS:
+                if jdata["type"] in ACCOUNT_COMMANDS:
                     succ, e = await self.CALLBACK_TABLE[jdata["type"]](websocket, jdata, email)
                     if not succ:
                         self.logger.error(f"Failed to handle account command: {jdata['type']}")

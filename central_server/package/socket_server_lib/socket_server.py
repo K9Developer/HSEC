@@ -4,7 +4,7 @@ import socket
 import threading
 from package.socket_server_lib.client import SocketClient
 from Cryptodome.PublicKey import ECC
-from Crypto.PublicKey.ECC import EccPoint
+from Cryptodome.PublicKey.ECC import EccPoint
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad, unpad
 import inspect
