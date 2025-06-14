@@ -17,7 +17,7 @@ class Camera:
         return f"Camera(mac={self.mac}, name={self.name}, last_frame={self.last_frame}, key={self.key})"
 
 class CameraDatabase:
-    def __init__(self, db_path='cameras.db'):
+    def __init__(self, db_path='./databases/cameras.db'):
         self.db_path = db_path
         self.local = threading.local()
         self._init_main_thread()

@@ -16,7 +16,7 @@ class User:
 
 
 class UserDatabase:
-    def __init__(self, db_path='users.db'):
+    def __init__(self, db_path='./databases/users.db'):
         self.db_path = db_path
         self.local = threading.local()
         self._init_main_thread()
