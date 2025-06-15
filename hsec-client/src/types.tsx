@@ -4,6 +4,7 @@ export interface Camera {
     ip: string;
     mac: string;
     connected?: boolean;
+    red_zone?: [number, number][];
 }
 
 export interface User {
@@ -18,6 +19,15 @@ export interface LoginResponse {
     user: User | null;
 }
 
+export interface HsecNotification {
+    type: string;
+    title: string;
+    message: string;
+    mac: string;
+    timestamp: number;
+    frame?: string; // Optional, as not all notifications may have a frame
+}
+
 // ---------
 
 export interface GenericResponse {
@@ -27,4 +37,8 @@ export interface GenericResponse {
 
 export interface GetCamerasResponse extends GenericResponse {
     cameras: Camera[];
+}
+
+export interface GetNotificationsResponse extends GenericResponse {
+    notifications: HsecNotification[];
 }

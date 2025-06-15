@@ -1,10 +1,12 @@
+from ast import Constant
 import asyncio
 import socket
+import time
 import websockets
 from websockets.asyncio.server import serve
-from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email
+from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email, send_motion_alert_email
 from package.camera_server.camera_server import CameraServer
-from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, ResponseStatus
+from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, ResponseStatus, RED_ZONE_ALERT_COOLDOWN
 from package.client_handler_server.database_manager import UserDatabase
 from package.socket_server_lib.socket_server import DefaultLogger
 import json
@@ -31,6 +33,7 @@ class ClientHandler:
             "on_camera_pairing_failed": lambda *a: self.__call_task(self.__on_camera_pairing_failed, *a),
             "on_camera_repair_failed": lambda *a: self.__call_task(self.__on_camera_pairing_failed, *a),
             "on_camera_frame": lambda *a: self.__call_task(self.__on_camera_frame, *a),
+            "on_red_zone_trigger": lambda *a: self.__call_task(self.__on_red_zone_trigger, *a),
         })
         
         self.CALLBACK_TABLE = {
@@ -51,6 +54,9 @@ class ClientHandler:
             "reset_password": self.__handle_password_reset,
 
             "share_camera": self.__share_camera,
+
+            "save_polygon": self.__save_polygon,
+            "get_notifications": self.__get_notifications
         }
 
         self.streaming_transactions = {
@@ -58,6 +64,9 @@ class ClientHandler:
             "frame": [],
             "paired_cameras": [],
         }
+
+        self.connected_sessions = {} # email -> websocket
+        self.camera_alert_times = {}
 
     def __hash_password(self, password):
         return hashlib.sha256(password.encode()).hexdigest()
@@ -94,6 +103,30 @@ class ClientHandler:
         for websocket, jdata in self.streaming_transactions["frame"]:
             if jdata["mac"] == mac:
                 await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "frame": base64.b64encode(frame).decode(), "type": "frame"}, jdata))
+
+    async def __on_red_zone_trigger(self, mac, frame):
+        if mac in self.camera_alert_times and time.time()-self.camera_alert_times[mac] < RED_ZONE_ALERT_COOLDOWN:
+            return
+        
+
+        self.camera_alert_times[mac] = time.time()
+        users_linked = self.db.get_users_using_camera(mac)
+        for email in users_linked:
+            websocket = self.connected_sessions.get(email[0])
+            if websocket:
+               await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "frame": base64.b64encode(frame).decode(), "type": "red_zone_trigger"}, {"transaction_id": 0})) 
+            
+            self.db.add_notification(email[0], {
+                "type": "red_zone_trigger",
+                "title": "Red Zone Triggered",
+                "message": f"Red zone triggered for camera {mac}.",
+                "mac": mac,
+                "timestamp": int(time.time()),
+                "frame": base64.b64encode(frame).decode()
+            })
+        
+        send_motion_alert_email([e[0] for e in users_linked], mac, frame, self.logger)
+            
 
     async def __on_camera_discovered(self, addr, mac):
         # self.logger.info(f"Camera discovered: {mac} ({self.streaming_transactions["discover_cameras"]})")
@@ -144,7 +177,7 @@ class ClientHandler:
         cameras = self.camera_server.db.get_all_cameras()
         linked_cameras = self.db.get_linked_cameras(email)
         connected_cameras = self.camera_server.connected_cameras
-        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else b"").decode(), "ip": cam.last_known_ip, "connected": cam.mac in connected_cameras} for cam in cameras if cam.mac in linked_cameras]
+        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else b"").decode(), "ip": cam.last_known_ip, "connected": cam.mac in connected_cameras, "red_zone": cam.red_zone} for cam in cameras if cam.mac in linked_cameras]
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, camera_list, jdata))
     
     async def __stream_camera(self, websocket, jdata, email):
@@ -207,8 +240,16 @@ class ClientHandler:
         
         self.db.add_linked_camera(email=share_email, camera_mac=mac)
         self.logger.info(f"Camera {mac} shared with {share_email}, sending email...")
-        send_camera_share_email(email, share_email, mac, self.logger)
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera shared", jdata))
+
+        self.db.add_notification(jdata["email"], {
+                "type": "camera_shared",
+                "title": "Camera Shared",
+                "message": f"Camera {mac} shared by {email}.",
+                "mac": mac,
+                "timestamp": int(time.time()),
+            })
+        send_camera_share_email(email, share_email, mac, self.logger)
 
 
     async def __unpair_camera(self, websocket, jdata, email):
@@ -219,7 +260,7 @@ class ClientHandler:
 
         # self.camera_server.db.remove_camera(mac)
         users_using_camera = self.db.get_users_using_camera(mac)
-        if users_using_camera == 0:
+        if len(users_using_camera) == 0:
             camera = self.camera_server.connected_cameras[mac]
             if camera and camera.client:
                 self.camera_server.camera_server.disconnect_client(camera.client)
@@ -229,6 +270,31 @@ class ClientHandler:
 
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera unpaired", jdata))
     
+    async def __save_polygon(self, websocket, jdata, email):
+        mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
+        
+        polygon = jdata["polygon"]
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Invalid polygon data", jdata))
+            return
+
+        self.camera_server.db.set_red_zone(mac, json.dumps(polygon))
+        self.camera_server.connected_cameras[mac].red_zone = polygon
+        self.logger.info(f"Polygon saved for camera {mac} with {len(polygon)} points")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Polygon saved", jdata))
+
+    async def __get_notifications(self, websocket, jdata, email):
+        if email is None:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Please login first", jdata))
+            return
+        
+        notifications = self.db.get_notifications(email)
+        self.logger.info(f"Sending {len(notifications)} notifications to {email}")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, notifications, jdata))
+
     # ---- accoutn stuff ----
 
     async def __handle_password_login(self, websocket, jdata, _):
@@ -295,6 +361,7 @@ class ClientHandler:
                     
                     self.logger.info(f"Account command handled successfully: {jdata['type']}")
                     email = e
+                    self.connected_sessions[email] = websocket
                     continue
                 
                 if email is None and jdata["type"] in PASSWORD_RESET_COMMANDS:

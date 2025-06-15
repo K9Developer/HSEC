@@ -1,4 +1,6 @@
+import io
 import time
+
 from ..socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
 from package.camera_server.constants import Constants, Messages
 import socket
@@ -7,9 +9,25 @@ import threading
 from Cryptodome.Util.Padding import pad, unpad
 from Cryptodome.Cipher import AES
 import time
+from PIL import Image, ImageDraw
+import imagehash
+from queue import Queue
 
-# TODO: How could we make a re-pair? we need to battle arp spoofing too0
-# TODO: Make the frames sent over UDP
+def perceptual_hash(image: Image.Image) -> int:
+    return int(str(imagehash.phash(image)), 16)
+
+def distance_between_hashes(hash1: int, hash2: int) -> int:
+    return bin(hash1 ^ hash2).count('1')
+
+def cut_polygon_from_image(image: Image.Image, polygon: list[list[int]]) -> Image.Image:
+    polygon = [tuple(pt) for pt in polygon]
+    mask = Image.new("L", image.size, 0)
+    ImageDraw.Draw(mask).polygon(polygon, fill=255)
+    red_zone = Image.new("RGB", image.size)
+    red_zone.paste(image, mask=mask)
+    xs, ys = zip(*polygon)
+    bbox = (min(xs), min(ys), max(xs), max(ys))
+    return red_zone.crop(bbox)
 
 
 class CameraServer:
@@ -41,6 +59,9 @@ class CameraServer:
         self.streaming_cameras = set()
         self.last_frame_update_time = {}
 
+        self.frame_queue = Queue()
+        self.last_redzone_hashes = {} # {mac: (hash, frames_passed)}
+
         self.db = CameraDatabase()
 
         self.camera_server.set_callback(
@@ -62,6 +83,11 @@ class CameraServer:
             Messages.CAMERA_FRAME,
             self.__handle_frame,
         )
+
+        threading.Thread(
+            target=self.__handle_frame_queue,
+            daemon=True,
+        ).start()
 
     @staticmethod
     def __does_match_pattern(data, pattern):
@@ -221,6 +247,29 @@ class CameraServer:
             self.logger.error(f"Camera {camera_mac} is not awaiting pairing, cannot handle bad code")
             return
 
+    def __handle_frame_queue(self):
+        while True:
+            camera, frame = self.frame_queue.get()
+            if camera is None or frame is None:
+                continue
+            
+            image = Image.open(io.BytesIO(frame)).convert("RGB")
+            polygon = camera.red_zone
+            red_zone_cut = cut_polygon_from_image(image, polygon)
+
+            red_zone_hash = perceptual_hash(red_zone_cut)
+
+            if camera.mac in self.last_redzone_hashes:
+                distance = distance_between_hashes(red_zone_hash, self.last_redzone_hashes[camera.mac][0])
+                print(f"Red zone hash distance for camera {camera.mac}: {distance}")
+                
+                if distance < Constants.RED_ZONE_SIMILARITY_THRESHOLD: continue
+
+                self.callbacks["on_red_zone_trigger"](camera.mac, frame)
+
+            self.last_redzone_hashes[camera.mac] = [red_zone_hash, 0]
+
+
     def __handle_frame(self, camera_cli, fields):
         frame = constants.Options.MESSAGE_SEPARATOR.join(fields[1:])
         camera = self.__get_camera_by_ip(camera_cli.addr[0])
@@ -231,6 +280,16 @@ class CameraServer:
         if camera.mac in self.streaming_cameras:
             self.callbacks["on_camera_frame"](camera.mac, frame)
         
+        check_red_zone = False
+        if camera.mac in self.last_redzone_hashes: 
+            self.last_redzone_hashes[camera.mac][1] += 1
+            if self.last_redzone_hashes[camera.mac][1] >= Constants.FRAMES_BETWEEN_RED_ZONE_CHECKS:
+                self.last_redzone_hashes[camera.mac][1] = 0
+                check_red_zone = True
+        else:
+            check_red_zone = True
+
+        if camera.red_zone is not None and check_red_zone: self.frame_queue.put((camera, frame))
         if time.time() - self.last_frame_update_time.get(camera.mac, 0) < Constants.STATIC_CAMERA_FRAME_UPDATE_INTERVAL:
             self.logger.debug(f"Skipping frame update for camera {camera.mac} due to rate limiting")
             return

@@ -10,7 +10,6 @@ interface Props {
 }
 
 const Button = ({ text, onClick, isLoading, disabled, className, icon: Icon }: Props) => {
-    console.log(disabled);
     return (
         <button
             onClick={onClick}

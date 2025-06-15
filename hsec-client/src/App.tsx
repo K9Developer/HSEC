@@ -13,6 +13,7 @@ import Button from "./components/Button.tsx";
 import Input from "./components/Input.tsx";
 import Modal from "./components/Modal.tsx";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
+import NotificationPage from "./pages/NotificationPage.tsx";
 
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
@@ -51,6 +52,10 @@ const App = () => {
             console.log("Connection status changed:", connected);
             setConnected(connected);
         })
+
+        DataManager.addEventListener("red_zone_trigger", () => {
+            alert("Red zone triggered! Please check the camera feed for more details.");
+        });
     }, []);
 
     useEffect(() => {
@@ -89,6 +94,7 @@ const App = () => {
                 const succ = await connect(code);
                 if (!succ) {
                     setShowServerCode(true);
+                    window.location.href = "/";
                 }
             }
 
@@ -97,6 +103,7 @@ const App = () => {
                 handleAutoLogin();
             } else {
                 setShowServerCode(true);
+                window.location.href = "/";
             }
         }
 
@@ -150,6 +157,7 @@ const App = () => {
                         <Route index element={<HomePage />} />
                         <Route path="connect" element={<ConnectToServerPage />} />
                         <Route path="account" element={<AccountPage />} />
+                        <Route path="notifications" element={<NotificationPage />} />
                         <Route path="discover" element={<DiscoveryPage />} />
                         <Route path="account/forgot-pass" element={<ForgotPasswordPage />} />
                         <Route path="camera/:cameraId" element={<CameraViewer />} />

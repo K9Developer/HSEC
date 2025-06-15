@@ -1,10 +1,10 @@
 // GetCameras, GetFrame, Etc.
 // Include caching and GetCameras will take a bool whether to override the cache
 
-import type { GenericResponse, GetCamerasResponse } from "../types";
+import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse } from "../types";
 
-export type DataEvent = "frame" | "camera_discovered"
-export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera";
+export type DataEvent = "frame" | "camera_discovered" | "red_zone_trigger"
+export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications";
 
 const SERVER_PORT = 34531
 
@@ -85,7 +85,7 @@ export class DataManager {
 
     private static message_handler(event: MessageEvent) {
         const response = JSON.parse(event.data);
-        if (response.transaction_id) {
+        if (response.transaction_id !== undefined) {
             if (DataManager.eventListeners[response.data?.type]) {
                 // console.log("Event listener found for type:", response.data?.type);
                 DataManager.eventListeners[response.data?.type](response.data);
@@ -94,8 +94,6 @@ export class DataManager {
             if (query) {
                 DataManager.awaitingResponses = DataManager.awaitingResponses.filter(r => r.transaction_id !== response.transaction_id);
                 query.resolve(response);
-            } else {
-                console.warn("Received response for unknown transaction_id:", response.transaction_id);
             }
         }
     }
@@ -280,6 +278,34 @@ export class DataManager {
             DataManager.sendRequest("share_camera", { mac, email }, (data) => {
                 if (data.error) resolve({ success: false, info: data.error });
                 else resolve({ success: data.status === "success", info: data.data || "" });
+            });
+        })
+    }
+
+    static async savePolygon(mac: string, polygon: [number, number][]): Promise<GenericResponse> {
+        return new Promise((resolve, _) => {
+            if (!DataManager.isConnected()) {
+                resolve({ success: false, info: "Not connected to server" });
+                return;
+            }
+
+            DataManager.sendRequest("save_polygon", { mac, polygon }, (data) => {
+                if (data.error) resolve({ success: false, info: data.error });
+                else resolve({ success: data.status === "success", info: data.data || "" });
+            });
+        })
+    }
+
+    static async getNotifications(): Promise<GetNotificationsResponse> {
+        return new Promise((resolve, _) => {
+            if (!DataManager.isConnected()) {
+                resolve({ success: false, info: "Not connected to server", notifications: [] });
+                return;
+            }
+
+            DataManager.sendRequest("get_notifications", {}, (data) => {
+                if (data.error) resolve({ success: false, info: data.error, notifications: [] });
+                else resolve({ success: data.status === "success", notifications: data.data || [], info: "" });
             });
         })
     }

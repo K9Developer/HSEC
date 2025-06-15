@@ -5,10 +5,10 @@ import { IconContext } from "react-icons/lib";
 import type { Camera } from "../types";
 import CameraCard from "../components/CameraCard";
 import { Link, useNavigate } from "react-router-dom";
-import { UserManager } from "../utils/AccountManager";
 import { DataManager } from "../utils/DataManager";
 import { macToId } from "../utils";
 import UserContext from "../contexts/UserContext";
+import { IoMdNotifications } from "react-icons/io";
 
 // TODO: Make the servercode be saved, if connection unsuccessful, show a modal to enter the server code
 // TODO: When at some point theres a disconnect, show a modal to enter the server code again
@@ -53,7 +53,7 @@ const HomePage = () => {
             }, 1000);
         }
         getCameras();
-        return () => {if (cameraGetInterval) clearInterval(cameraGetInterval);}
+        return () => { if (cameraGetInterval) clearInterval(cameraGetInterval); }
     }, [user])
 
     useEffect(() => {
@@ -67,11 +67,20 @@ const HomePage = () => {
             <div className="h-[93%] flex flex-col gap-5">
                 <div className="flex justify-between h-15 items-center bg-mediumpurple p-3">
                     <p className="text-foreground text-lg font-semibold">{user?.logged_in ? `Welcome, ${emailToName(user?.email)}` : ""}</p>
-                    <Link to="/account">
-                        <IconContext.Provider value={{ className: "text-foreground" }}>
-                            <MdAccountCircle size={40} />
-                        </IconContext.Provider>
-                    </Link>
+                    <div className="flex flex-row gap-3 items-center">
+                        {user?.logged_in &&
+                            <Link to="/notifications">
+                                <IconContext.Provider value={{ className: "text-foreground" }}>
+                                    <IoMdNotifications size={32} />
+                                </IconContext.Provider>
+                            </Link>
+                        }
+                        <Link to="/account">
+                            <IconContext.Provider value={{ className: "text-foreground" }}>
+                                <MdAccountCircle size={40} />
+                            </IconContext.Provider>
+                        </Link>
+                    </div>
                 </div>
                 <div className="flex flex-col gap-3 p-3 overflow-y-auto h-full">
                     {cameraList.length === 0 ? (

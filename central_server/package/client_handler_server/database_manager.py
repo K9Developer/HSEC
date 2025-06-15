@@ -1,3 +1,4 @@
+import json
 import random
 import sqlite3
 import threading
@@ -38,7 +39,8 @@ class UserDatabase:
                 linked_cameras TEXT DEFAULT '',
                 salt TEXT DEFAULT '',
                 reset_code TEXT DEFAULT '',
-                reset_code_expiry INTEGER
+                reset_code_expiry INTEGER,
+                notifications TEXT DEFAULT '[]'
             )
         ''')
         conn.commit()
@@ -59,9 +61,9 @@ class UserDatabase:
         password_hash = self.__hash_password(psw, salt)
         print(f"Password for {email}: {psw} + {salt}")
         cursor.execute('''
-            INSERT OR REPLACE INTO users (email, password_hash, active_session_id, session_expiry, linked_cameras, salt)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (email, password_hash, sess, expiry, '', salt))
+            INSERT OR REPLACE INTO users (email, password_hash, active_session_id, session_expiry, linked_cameras, salt, notifications)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (email, password_hash, sess, expiry, '', salt, '[]'))
         conn.commit()
         return sess, expiry
     
@@ -148,7 +150,7 @@ class UserDatabase:
         _, cursor = self._get_conn()
         cursor.execute('SELECT email FROM users WHERE linked_cameras LIKE ?', ('%' + camera_mac + '%',))
         rows = cursor.fetchall()
-        return len(rows)
+        return rows
 
     def user_exists(self, email):
         _, cursor = self._get_conn()
@@ -173,4 +175,23 @@ class UserDatabase:
         if row:
             return True
         return False
-        
+    
+    def get_notifications(self, email):
+        _, cursor = self._get_conn()
+        cursor.execute('SELECT notifications FROM users WHERE email = ?', (email,))
+        row = cursor.fetchone()
+        if row:
+            return json.loads(row[0]) if row[0] else []
+        return []
+    
+    def add_notification(self, email, notification):
+        conn, cursor = self._get_conn()
+        cursor.execute('SELECT notifications FROM users WHERE email = ?', (email,))
+        row = cursor.fetchone()
+        if row:
+            notifications = json.loads(row[0]) if row[0] else []
+            notifications.append(notification)
+            cursor.execute('UPDATE users SET notifications = ? WHERE email = ?', (json.dumps(notifications), email))
+            conn.commit()
+            return True
+        return False

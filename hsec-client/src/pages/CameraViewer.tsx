@@ -9,11 +9,16 @@ import Button from "../components/Button";
 import { FaShareAlt } from "react-icons/fa";
 import Modal from "../components/Modal";
 import Input from "../components/Input";
-
+import { PiPolygonBold } from "react-icons/pi";
+import { TbPolygonOff } from "react-icons/tb";
+import { BiStopCircle } from "react-icons/bi";
 
 // Add modal with email
 
 let timeout: null | number = null;
+const img = new Image();
+let firstFrame = true;
+
 const CameraViewer = () => {
     const { cameraId } = useParams();
     const [camera, setCamera] = React.useState<null | Camera>(null);
@@ -21,14 +26,110 @@ const CameraViewer = () => {
     const [currentSourceUrl, setCurrentSourceUrl] = React.useState<string>("");
     const [shareEmail, setShareEmail] = React.useState<string>("");
     const [loadingShare, setLoadingShare] = React.useState<boolean>(false);
+    const [recordingPolygon, setRecordingPolygon] = React.useState<boolean>(false);
+    const [askSavePolygon, setAskSavePolygon] = React.useState<boolean>(false);
+    const [imageSize, setImageSize] = React.useState<{ width: number; height: number }>({ width: 0, height: 0 });
+    const [polygonPoints, setPolygonPoints] = React.useState<[number, number][]>([]);
+
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const presetPolygonPoints = useRef<boolean>(false);
     const mac = useRef<string | null>(null);
     const navigate = useNavigate();
     // const [streaming, setStreaming] = React.useState<boolean>(false);
 
+    useEffect(() => {
+        if (!camera?.red_zone) return;
+        // if (presetPolygonPoints?.current) return;
+        console.log(camera?.red_zone, camera.red_zone.length)
+        if (camera?.red_zone && camera.red_zone.length > 0) {
+            console.log(camera.red_zone)
+            setPolygonPoints(camera.red_zone.map(point => [point[0], point[1]]));
+            presetPolygonPoints.current = true;
+        }
+    }, [canvasRef, camera]);
+
+    const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!recordingPolygon) return;
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        setPolygonPoints(prevPoints => {
+            if (prevPoints.length === 0) return [[x, y]];
+
+            const [firstX, firstY] = prevPoints[0];
+            const dx = x - firstX;
+            const dy = y - firstY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < 10) {
+                return prevPoints;
+            }
+
+            return [...prevPoints, [x, y]];
+        });
+    };
+
+    useEffect(() => {
+        console.log("Canvas points updated:", polygonPoints);
+        const canvas = canvasRef.current;
+        if (!canvas) {
+            console.error("Canvas element not found");
+            return;
+        }
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+            console.error("Failed to get canvas context");
+            return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (polygonPoints.length > 0) {
+            ctx.beginPath();
+            ctx.moveTo(polygonPoints[0][0], polygonPoints[0][1]);
+            polygonPoints.forEach(point => {
+                ctx.lineTo(point[0], point[1]);
+            });
+            ctx.closePath();
+            ctx.fillStyle = "rgba(255, 0, 0, 0.07)";
+            ctx.fill();
+
+            ctx.strokeStyle = "rgba(255, 0, 0, 0.3)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+            polygonPoints.forEach(([x, y]) => {
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+    }, [polygonPoints, canvasRef.current, imageSize]);
+
+
     const onFrame = (data: any) => {
         if (timeout) clearTimeout(timeout);
-        console.log("Received frame from camera:", cameraId);
         const newSourceUrl = `data:image/jpeg;base64,${data.frame}`;
+        if (firstFrame) {
+            console.log("Setting initial image size from new source URL");
+            img.src = newSourceUrl;
+            img.onload = () => {
+                setImageSize({ width: img.width, height: img.height });
+            };
+            firstFrame = false;
+        }
+
         setCurrentSourceUrl(newSourceUrl);
     };
 
@@ -79,12 +180,14 @@ const CameraViewer = () => {
         DataManager.addEventListener("frame", onFrame);
         setupStream();
 
-           timeout = setTimeout(() => {
-                if (!camera || !currentSourceUrl) {
-                    alert("Failed to load camera feed. Please try again later.");
-                    navigate("/");
-                }
-            }, 5000);
+        timeout = setTimeout(() => {
+            if (!camera || !currentSourceUrl) {
+                alert("Failed to load camera feed. Please try again later.");
+                navigate("/");
+            }
+        }, 5000);
+
+
 
         return () => {
             DataManager.stopStreamCamera(mac.current!);
@@ -103,6 +206,37 @@ const CameraViewer = () => {
 
     return (
         <div className="flex flex-col bg-darkpurple h-full">
+
+            <Modal visible={askSavePolygon} onClose={() => setAskSavePolygon(false)}>
+                <p className="text-foreground text-sm">Do you want to save the polygon?</p>
+                <div className="flex flex-row gap-2 mt-4">
+                    <Button
+                        text="Yes"
+                        className="w-full"
+                        onClick={() => {
+                            // Save polygon logic here
+                            setAskSavePolygon(false);
+                            DataManager.savePolygon(camera.mac, polygonPoints).then((res: any) => {
+                                if (res.success) {
+                                    alert("Polygon saved successfully!");
+                                    setPolygonPoints([]);
+                                    setRecordingPolygon(false);
+                                } else {
+                                    alert("Failed to save polygon: " + res.info);
+                                }
+                            })
+                        }}
+                    />
+                    <Button
+                        text="No"
+                        className="w-full"
+                        onClick={() => {
+                            setAskSavePolygon(false)
+                            setPolygonPoints([]);
+                        }}
+                    />
+                </div>
+            </Modal>
 
             <Modal
                 visible={showShare}
@@ -158,13 +292,24 @@ const CameraViewer = () => {
             </div>
             <div className="flex flex-col justify-between h-full pb-4 px-2">
                 <div className="mt-2 p-2">
-                    <div className="rounded-xl bg-lightpurple w-full">
-                        <img src={currentSourceUrl ? currentSourceUrl : undefined} alt="Live Feed" />
+                    <div className="rounded-xl bg-lightpurple w-full relative" style={{
+                        aspectRatio: imageSize.width / imageSize.height,
+                    }}>
+                        <img src={currentSourceUrl} alt="Camera Feed" className="w-full h-full" />
+                        <canvas className="w-full absolute top-0 left-0 h-full rounded-md bg-transparent" id="cameraCanvas" ref={canvasRef} onClick={handleCanvasClick} />
+
                     </div>
                 </div>
                 <div className="w-full px-2 flex flex-row gap-2">
                     {/* <Button text="Share" className="w-1/2" icon={FaShareAlt} onClick={() => setShowShare(true)} /> */}
                     <Button text="Share" className="w-full" icon={FaShareAlt} onClick={() => setShowShare(true)} />
+                    {recordingPolygon ? <Button text="Stop Polygon" className="w-full" icon={TbPolygonOff} onClick={() => {
+                        setRecordingPolygon(false)
+                        setAskSavePolygon(true);
+                    }} /> : <Button text="Record Polygon" className="w-full" icon={PiPolygonBold} onClick={() => {
+                        setPolygonPoints([]);
+                        setRecordingPolygon(true)
+                    }} />}
                 </div>
             </div>
         </div>

@@ -1,6 +1,6 @@
 import sqlite3
 import threading
-
+import ast
 from package.socket_server_lib.client import SocketClient
 
 class Camera:
@@ -9,7 +9,7 @@ class Camera:
         self.name = name
         self.last_frame = last_frame
         self.key = key
-        self.red_zone = red_zone
+        self.red_zone = red_zone if red_zone is None or isinstance(red_zone, list) else ast.literal_eval(red_zone)
         self.last_known_ip = last_known_ip
         self.client: SocketClient | None = None
 
