@@ -96,6 +96,8 @@ class SocketServer:
 
     def start(self, no_loop=False):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM if self.protocol == constants.ServerProtocol.TCP else socket.SOCK_DGRAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536*3)
+
         if not self.reserve_port:
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.host, self.port))
@@ -126,11 +128,14 @@ class SocketServer:
 
     def disconnect_client(self, client: SocketClient):
         if client in self.clients:
-            self.__handle_callback(constants.SocketServerCallbacks.ON_DISCONNECT, client)
+
+            client.socket.shutdown(socket.SHUT_RDWR)
             client.socket.close()
+
             self.clients.remove(client)
             client.is_connected = False
             self.logger.info(f"Client {client.addr} disconnected")
+            self.__handle_callback(constants.SocketServerCallbacks.ON_DISCONNECT, client)
         else:
             self.logger.error(f"Client {client.addr} not found in connected clients")
 
@@ -215,28 +220,30 @@ class SocketServer:
         self.__send_raw_bytes(client, modified_data, options)
 
     def __receive_raw_bytes(self, client: SocketClient, size: int) -> bytes:
-        client.socket.settimeout(10)
-        def enter():
-            if not client.is_connected:
-                self.logger.error(f"Client {client.addr} is not connected")
-                return b""
-            try:
-                data = b""
+        try:
+            client.socket.settimeout(5)
+            def enter():
+                data = bytearray()
                 while len(data) < size:
-                    chunk = client.socket.recv(size - len(data))
-                    if not chunk:
-                        self.logger.error(f"Client {client.addr} disconnected while receiving data")
+                    try:
+                        chunk = client.socket.recv(min(4096, size - len(data)))
+                    except socket.timeout:
+                        self.logger.error(f"Timeout receiving from {client.addr}")
                         return b""
-                    data += chunk
-            
+
+                    if not chunk:
+                        self.logger.error(f"Client {client.addr} disconnected")
+                        return b""
+
+                    data.extend(chunk)
                 self.logger.debug(f"Received raw bytes from {client.addr}: {len(data)} bytes")
-                return data
-            except Exception as e:
-                self.logger.error(f"Error receiving raw bytes from {client.addr}: {e}")
-                return b""
-        ret_val = enter()
-        client.socket.settimeout(None)
-        return ret_val
+                return bytes(data)
+            ret_val = enter()
+            client.socket.settimeout(None)
+            return ret_val
+        except Exception as e:
+            self.logger.error(f"Error receiving raw bytes from {client.addr}: {e}")
+            return b""
 
     def receive_data(self, client: SocketClient, options: constants.DataTransferOptions = constants.DataTransferOptions.WITH_SIZE, optional_buffer_size = None) -> list[bytes]:
         # while client.locked: pass
@@ -391,10 +398,10 @@ class SocketServer:
             except socket.timeout:
                 self.logger.warning(f"Socket timeout while receiving data from {client.addr}")
                 break
-            except Exception as e:
-                self.logger.error(f"Error handling client {client.addr}: {e}")
-                self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
-                break
+            # except Exception as e:
+            #     self.logger.error(f"Error handling client {client.addr}: {e}")
+            #     self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
+            #     break
             # except Exception as e:
             #     self.logger.error(f"Error handling client {client.addr}: {e}")
             #     self.__handle_callback(constants.SocketServerCallbacks.CLIENT_ERROR, client, e)
@@ -405,6 +412,7 @@ class SocketServer:
         while True:
             # try:
                 client_socket, addr = self.server_socket.accept()
+                client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4<<20)
                 self.__handle_callback(constants.SocketServerCallbacks.ON_BEFORE_CONNECT, client_socket, addr)
 
                 client = SocketClient(client_socket, addr)
@@ -413,8 +421,7 @@ class SocketServer:
                 transfer_options = constants.DataTransferOptions.WITH_SIZE
                 self.logger.debug(f"Default transfer options set to {transfer_options}")
 
-                thread = threading.Thread(target=self.__handle_client, args=(client,))
-                thread.daemon = True
+                thread = threading.Thread(target=self.__handle_client, args=(client,), daemon=True)
                 thread.start()
                 client.client_thread = thread
 

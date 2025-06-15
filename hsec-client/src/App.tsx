@@ -15,6 +15,21 @@ import Modal from "./components/Modal.tsx";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
 import NotificationPage from "./pages/NotificationPage.tsx";
 
+const requestNotificationPermission = async () => {
+    if ("Notification" in window && Notification.permission !== "granted") {
+        try {
+            const permission = await Notification.requestPermission();
+            if (permission === "granted") {
+                console.log("Notification permission granted");
+            } else {
+                console.warn("Notification permission denied");
+            }
+        } catch (error) {
+            console.error("Failed to request notification permission:", error);
+        }
+    }
+}
+
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
     const [showServerCode, setShowServerCode] = useState(false);
@@ -94,7 +109,8 @@ const App = () => {
                 const succ = await connect(code);
                 if (!succ) {
                     setShowServerCode(true);
-                    window.location.href = "/";
+                    console.log(1111111111111111, window.location.href)
+                    if (window.location.pathname !== "/") window.location.href = "/";
                 }
             }
 
@@ -103,7 +119,7 @@ const App = () => {
                 handleAutoLogin();
             } else {
                 setShowServerCode(true);
-                window.location.href = "/";
+                if (window.location.pathname !== "/") window.location.href = "/";
             }
         }
 

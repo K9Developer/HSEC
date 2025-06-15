@@ -77,7 +77,9 @@ private:
             }
 
             size_t to_write = std::min(space, len - offset);
-            int written = tcp_client.write(data + offset, to_write);
+            if (!tcp_client || !tcp_client.connected())
+                return false;
+            size_t written = tcp_client.write(data + offset, to_write);
             // Logger::debug("WRITTEN ", written, " bytes");
             if (written <= 0)
                 return false;
@@ -204,7 +206,6 @@ public:
         {
             std::vector<uint8_t> sizeBytes = this->_recv(MESSAGE_SIZE_BYTE_LENGTH);
             if (sizeBytes.size() != MESSAGE_SIZE_BYTE_LENGTH) {
-                Logger::info("Invalid message length (", sizeBytes.size(), ")! ignoring...");
                 return {};
             }
             bufferSize = this->number_from_bytes(sizeBytes);
@@ -255,14 +256,8 @@ public:
             auto size_bytes = this->number_to_bytes(data.size(), MESSAGE_SIZE_BYTE_LENGTH);
             data.insert(data.begin(), size_bytes.begin(), size_bytes.end());
         }
-        auto a = this->_send(data);
-        // if (data.size() > 1000) {
-        //     Logger::hex_dump(data);
-        //     while (true) delay(1000);
-        // }
 
-
-        return a;
+        return this->_send(data);;
     }
 };
 

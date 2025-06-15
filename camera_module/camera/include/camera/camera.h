@@ -37,6 +37,9 @@ private:
     Task *heartbeat_response_task;
     Task *repair_task;
     Task *stream_task;
+    Task *listen_task;
+
+    uint8_t frame_counter = 0;
 
     ServerData server_data;
 
@@ -108,9 +111,15 @@ private:
     }
 
     void _purge_server() {
+        this->tcp_soc->tcp_client.flush();
+        this->tcp_soc->tcp_client.stop();
+
         this->server_data.addr = IPAddress();
         this->server_data.port = 0;
-        this->tcp_soc->tcp_client.stop();
+
+        this->curr_frame.clear();
+        this->curr_frame.shrink_to_fit();
+
         clear_eeprom();
     }
 
@@ -300,13 +309,14 @@ public:
         Logger::debug("Creating sockets...");
         udp_soc = new SocketUDP();
         tcp_soc = new SocketTCP();
-        if (!udp_soc->begin())
+        if (!udp_soc->begin(CAMERA_HEARTBEAT_PORT))
             _on_fatal_error("Failed to start UDP socket!");
 
         Logger::debug("Setting up tasks...");
         heartbeat_send_task = new Task([this](){ this->send_heartbeat(); }, 1000);
         heartbeat_response_task = new Task([this](){ this->listen_for_heartbeat_response(); }, 1000);
         repair_task = new Task([this](){ this->repair_camera(); }, 1000);
+        listen_task = new Task([this](){ this->listen_for_messages(); }, 1000);
         stream_task = new Task([this](){ this->steam_camera(); }, -1);
 
         this->mac = std::vector<uint8_t>(mac, mac + 6);
@@ -322,6 +332,17 @@ public:
         write_data_to_eeprom(this->server_data);
     }
 
+    void listen_for_messages() {
+        auto raw_bytes = udp_soc->recv();
+        if (raw_bytes.empty()) return;
+        auto fields = _bytes_to_fields(raw_bytes);
+        if (decode(fields[0]) == "CAMUNPAIR-HSEC" && udp_soc->udp_client.remoteIP() == server_data.addr) {
+            _purge_server();
+            current_state = DISCOVERING;
+           Logger::info("Recieved an unpair request, purging server...");
+        }
+    }
+
     void repair_camera() {
         this->current_state &= ~REPEAIRING;
         auto success = this->_relink_to_server();
@@ -333,7 +354,12 @@ public:
     }
 
     void steam_camera() {
+        static unsigned long last_fps_time = 0;
+        static uint32_t frame_count = 0;
+
         if (this->camera->capture_frame(this->curr_frame)) {
+            frame_count++;
+
             auto succ = this->tcp_soc->send(this->_fields_to_bytes(
                 "CAMFRAME-HSEC",
                 this->curr_frame
@@ -342,7 +368,14 @@ public:
                 Logger::error("Failed to send frame!");
         }
 
+        unsigned long now = millis();
+        if (now - last_fps_time >= 1000) {
+            Logger::info("FPS: ", frame_count);
+            frame_count = 0;
+            last_fps_time = now;
+        }
     }
+
 
     void send_heartbeat()
     {
@@ -357,8 +390,7 @@ public:
     {
 
         auto raw_bytes = udp_soc->recv();
- if (raw_bytes.empty()) return;
-        Logger::hex_dump(raw_bytes);
+        if (raw_bytes.empty()) return;
         auto fields = _bytes_to_fields(raw_bytes);
         if (fields.size() != 3)
         {
@@ -426,16 +458,17 @@ public:
             }
             else current_state = DISCOVERING;
         }
-        if (current_state & DISCOVERING)
-        {
+
+        if (current_state & DISCOVERING) {
             heartbeat_send_task->tick();
             heartbeat_response_task->tick();
-        }
-        else if (current_state & REPEAIRING) {
+        } else if (current_state & REPEAIRING) {
             repair_task->tick();
         } else if (current_state & LINKED) {
             stream_task->force_run();
+            listen_task->tick();
         }
+
 
         // If clicked button, purge_server and put on discovering
     }

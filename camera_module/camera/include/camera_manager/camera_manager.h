@@ -42,7 +42,7 @@ public:
             .jpeg_quality  = 12,
             .fb_count      = 3,
             .fb_location   = CAMERA_FB_IN_PSRAM,
-            .grab_mode     = CAMERA_GRAB_LATEST
+            .grab_mode     = CAMERA_GRAB_WHEN_EMPTY
         };
 
 
@@ -75,6 +75,8 @@ public:
 
         // Initialize camera
         const auto config = this->get_config();
+        esp_camera_deinit();
+        delay(200);
         esp_err_t err = esp_camera_init(&config);
         if (err != ESP_OK) {
             Logger::error("Failed to initialized camera! Error code: ", err);

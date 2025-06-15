@@ -240,7 +240,7 @@ export class DataManager {
         })
     }
 
-    static async removePairedCamera(mac: string): Promise<GenericResponse> {
+    static async unpairCamera(mac: string): Promise<GenericResponse> {
         return new Promise((resolve, _) => {
             if (!DataManager.isConnected()) {
                 resolve({ success: false, info: "Not connected to server" });

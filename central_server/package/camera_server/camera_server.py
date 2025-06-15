@@ -146,7 +146,6 @@ class CameraServer:
                 
                 print(f"Received data from {addr}: {data}")
 
-
                 if CameraServer.__does_match_pattern(data, Messages.CAMERA_PAIRING_QUERY):
                     fields = data
                     if len(fields) != 2:
@@ -172,6 +171,27 @@ class CameraServer:
             constants.DataTransferOptions.RAW
         )
         self.cameras_awaiting_pairing.add(camera_addr[0])
+
+    def unpair_camera(self, camera_mac):
+        if camera_mac not in self.connected_cameras:
+            self.logger.error(f"Camera {camera_mac} not connected")
+            return False
+        
+        camera = self.connected_cameras[camera_mac]
+        if camera.client is None:
+            self.logger.error(f"Camera {camera_mac} client is None")
+            return False
+        
+        camera_ip = camera.client.addr[0]
+
+        self.camera_discover_server.server_socket.sendto(
+            constants.Options.MESSAGE_SEPARATOR.join(Messages.CAMERA_UNPAIR_REQUEST),
+            (camera_ip, Constants.CAMERA_HEARTBEAT_LISTENER_PORT)
+        )
+        
+        self.db.remove_camera(camera_mac)
+        self.logger.info(f"Camera {camera_mac} unpaired successfully")
+        return True
 
     def get_current_frame(self, camera_mac):
         if camera_mac not in self.connected_cameras:
@@ -220,14 +240,12 @@ class CameraServer:
         return None
 
     def __on_camera_disconnect(self, camera_cli):
-        print(f"Camera {camera_cli.addr[0]} disconnected")
         camera = self.__get_camera_by_ip(camera_cli.addr[0])
         if camera is None:
             self.logger.error(f"Camera {camera_cli.addr[0]} not found in connected cameras")
             return
         
-        self.logger.info(f"Camera {camera.mac} disconnected")
-        del self.connected_cameras[camera.mac]
+        if camera.mac in self.connected_cameras: del self.connected_cameras[camera.mac]
 
     def __handle_bad_code(self, camera_cli, fields):
         if len(fields) != 2:
@@ -252,6 +270,8 @@ class CameraServer:
             camera, frame = self.frame_queue.get()
             if camera is None or frame is None:
                 continue
+
+            if camera.mac not in self.connected_cameras: continue
             
             image = Image.open(io.BytesIO(frame)).convert("RGB")
             polygon = camera.red_zone
@@ -261,11 +281,9 @@ class CameraServer:
 
             if camera.mac in self.last_redzone_hashes:
                 distance = distance_between_hashes(red_zone_hash, self.last_redzone_hashes[camera.mac][0])
-                print(f"Red zone hash distance for camera {camera.mac}: {distance}")
                 
-                if distance < Constants.RED_ZONE_SIMILARITY_THRESHOLD: continue
-
-                self.callbacks["on_red_zone_trigger"](camera.mac, frame)
+                if distance >= Constants.RED_ZONE_SIMILARITY_THRESHOLD:
+                    self.callbacks["on_red_zone_trigger"](camera.mac, frame)
 
             self.last_redzone_hashes[camera.mac] = [red_zone_hash, 0]
 
@@ -275,6 +293,7 @@ class CameraServer:
         camera = self.__get_camera_by_ip(camera_cli.addr[0])
         if camera is None:
             self.logger.error(f"Camera {camera_cli.addr[0]} not found in connected cameras")
+            self.camera_server.disconnect_client(camera_cli)
             return
         
         if camera.mac in self.streaming_cameras:
@@ -290,7 +309,7 @@ class CameraServer:
             check_red_zone = True
 
         if camera.red_zone is not None and check_red_zone: self.frame_queue.put((camera, frame))
-        if time.time() - self.last_frame_update_time.get(camera.mac, 0) < Constants.STATIC_CAMERA_FRAME_UPDATE_INTERVAL:
+        if self.last_frame_update_time.get(camera.mac) and time.time() - self.last_frame_update_time.get(camera.mac, 0) < Constants.STATIC_CAMERA_FRAME_UPDATE_INTERVAL:
             self.logger.debug(f"Skipping frame update for camera {camera.mac} due to rate limiting")
             return
         camera.last_frame = frame
@@ -299,42 +318,47 @@ class CameraServer:
 
     def __handle_repair_request(self, camera_cli, fields):
         def __handle_repair(camera_mac):
-            camera_cli.auto_recv = False
-            self.logger.info(f"Received repair request from camera {camera_mac} at {camera_cli.addr[0]}")
-            if self.db.get_camera(camera_mac) is None:
-                self.logger.error(f"Camera {camera_mac} not found in database")
-                return
-            
-            camera = self.db.get_camera(camera_mac)
-            if camera is None:
-                self.logger.error(f"Camera {camera_mac} not found in database")
-                return
-            camera.client = camera_cli
-            camera.client.transfer_options = constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES
-            camera.client.random = camera.key
-
-            # TODO: susceptible to replay attacks
-            encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair", AES.block_size))
-            self.camera_server.send_data(camera.client, CameraServer.__handle_template(Messages.CAMERA_REPAIR_CONFIRM, encrypted_confirm))
-            data = self.camera_server.receive_data_with_pattern(camera.client, Messages.CAMERA_REPAIR_CONFIRM_ACK)
-            if data is None:
-                self.logger.error(f"Failed to receive repair confirmation from camera {camera_mac}")
-                self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, "Failed to receive repair confirmation")
-                self.camera_server.disconnect_client(camera.client)
-                return
-            
-            decrypted_data = unpad(camera.client.get_aes().decrypt(data[1]), AES.block_size)
-            if len(data) != 2 or decrypted_data != b"confirm-pair-ack":
-                self.logger.error(f"Invalid repair confirmation message received from camera {camera_mac}")
-                self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, "Invalid repair confirmation message")
-                self.camera_server.disconnect_client(camera.client)
-                return
+            try:
+                camera_cli.auto_recv = False
+                self.logger.info(f"Received repair request from camera {camera_mac} at {camera_cli.addr[0]}")
+                if self.db.get_camera(camera_mac) is None:
+                    self.logger.error(f"Camera {camera_mac} not found in database")
+                    return
                 
-            self.logger.info(f"Camera {camera_mac} repaired successfully")
-            camera_cli.auto_recv = True
-            self.db.update_camera_ip(camera_mac, camera_cli.addr[0])
-            self.connected_cameras[camera_mac] = camera
-            self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
+                camera = self.db.get_camera(camera_mac)
+                if camera is None:
+                    self.logger.error(f"Camera {camera_mac} not found in database")
+                    return
+                camera.client = camera_cli
+                camera.client.transfer_options = constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES
+                camera.client.random = camera.key
+
+                # TODO: susceptible to replay attacks
+                encrypted_confirm = camera.client.get_aes().encrypt(pad(b"confirm-pair", AES.block_size))
+                self.camera_server.send_data(camera.client, CameraServer.__handle_template(Messages.CAMERA_REPAIR_CONFIRM, encrypted_confirm))
+                data = self.camera_server.receive_data_with_pattern(camera.client, Messages.CAMERA_REPAIR_CONFIRM_ACK)
+                if data is None:
+                    self.logger.error(f"Failed to receive repair confirmation from camera {camera_mac}")
+                    self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, "Failed to receive repair confirmation")
+                    self.camera_server.disconnect_client(camera.client)
+                    return
+                
+                decrypted_data = unpad(camera.client.get_aes().decrypt(data[1]), AES.block_size)
+                if len(data) != 2 or decrypted_data != b"confirm-pair-ack":
+                    self.logger.error(f"Invalid repair confirmation message received from camera {camera_mac}")
+                    self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, "Invalid repair confirmation message")
+                    self.camera_server.disconnect_client(camera.client)
+                    return
+                    
+                self.logger.info(f"Camera {camera_mac} repaired successfully")
+                camera_cli.auto_recv = True
+                self.db.update_camera_ip(camera_mac, camera_cli.addr[0])
+                self.connected_cameras[camera_mac] = camera
+                self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
+            except Exception as e:
+                self.logger.error(f"Error handling repair request from camera {camera_mac}: {e}")
+                self.callbacks["on_camera_repair_failed"](camera_cli.addr, camera_mac, str(e))
+                self.camera_server.disconnect_client(camera_cli)
 
         thread = threading.Thread(target=__handle_repair, args=(fields[1].decode(),))
         thread.daemon = True

@@ -67,7 +67,6 @@ class CameraDatabase:
     def rename_camera(self, mac, new_name):
         conn, cursor = self._get_conn()
         cursor.execute('SELECT * FROM cameras')
-        print("Before:", type(cursor.fetchone()[0]), mac)
         cursor.execute('UPDATE cameras SET name = ? WHERE mac = ?', (new_name, mac))
         conn.commit()
 

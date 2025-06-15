@@ -219,7 +219,6 @@ const CameraViewer = () => {
                             DataManager.savePolygon(camera.mac, polygonPoints).then((res: any) => {
                                 if (res.success) {
                                     alert("Polygon saved successfully!");
-                                    setPolygonPoints([]);
                                     setRecordingPolygon(false);
                                 } else {
                                     alert("Failed to save polygon: " + res.info);

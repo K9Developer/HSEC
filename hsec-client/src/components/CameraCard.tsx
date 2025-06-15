@@ -8,6 +8,7 @@ import Input from "./Input";
 import Button from "./Button";
 import { DataManager } from "../utils/DataManager";
 import { VscDebugDisconnect } from "react-icons/vsc";
+import { AiOutlineDisconnect } from "react-icons/ai";
 
 interface Props {
     camera: Camera;
@@ -16,14 +17,16 @@ interface Props {
 }
 
 const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
-    const [showModal, setShowModal] = React.useState(false);
+    const [showRenameModal, setShowRenameModal] = React.useState(false);
+    const [showUnpairModal, setShowUnpairModal] = React.useState(false);
     const [currCameraName, setCurrCameraCode] = React.useState(camera.name);
+    const [loadingUnpair, setLoadingUnpair] = React.useState(false);
 
     const renameCamera = async (name: string) => {
         // Simulate renaming camera
         DataManager.renameCamera(camera.mac, name).then((res) => {
             if (res.success) {
-                setShowModal(false);
+                setShowRenameModal(false);
                 updateCameraList()
             } else {
                 alert("Failed to rename camera: " + res.info);
@@ -37,9 +40,9 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
     return (
         <div className="w-full bg-lightpurple rounded-xl overflow-hidden flex flex-col min-h-[200px]">
             <Modal
-                visible={showModal}
+                visible={showRenameModal}
                 onClose={() => {
-                    setShowModal(false);
+                    setShowRenameModal(false);
                 }}
             >
                 <p className="text-foreground text-sm">Rename Camera</p>
@@ -67,24 +70,75 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
                     }}
                 />
             </Modal>
+            <Modal
+                visible={showUnpairModal}
+                onClose={() => {
+                    setShowRenameModal(false);
+                }}
+            >
+                <p className="text-foreground text-sm">Unpair Camera, Are you sure?</p>
+                <p className="text-lighterpurple text-xs mb-6">This action will remove the camera from the database and unlink it completely, the only way to recover it would be re-pairing it.</p>
+                
+                <Button
+                    text="Unpair Camera"
+                    className="mt-8 w-full"
+                    isLoading={loadingUnpair}
+                    onClick={() => {
+                        setLoadingUnpair(true);
+                        DataManager.unpairCamera(camera.mac).then((res) => {
+                            if (res.success) {
+                                setShowUnpairModal(false);
+                                updateCameraList();
+                                setLoadingUnpair(false);
+                            } else {
+                                alert("Failed to unpair camera: " + res.info);
+                                setLoadingUnpair(false);
+                            }
+                        }).catch((err) => {
+                            console.error("Error unpairing camera:", err);
+                            alert("An error occurred while unpairing the camera.");
+                            setLoadingUnpair(false);
+                        });
+                    }}
+                />
 
-            <div className="flex flex-row justify-between items-center">
+                {/* <Button
+                    text="Rename"
+                    className="mt-8 w-full"
+                    disabled={currCameraName === camera.name || currCameraName === ""}
+                    onClick={() => {
+                        if (currCameraName === camera.name) return;
+                        if (currCameraName === "") {
+                            alert("Camera name cannot be empty");
+                            return;
+                        }
+                        renameCamera(currCameraName);
+                    }}
+                /> */}
+            </Modal>
+
+            <div className="flex flex-row justify-between items-center px-4 py-2">
                 <IconContext.Provider value={{ className: "text-purple" }}>
-                    <div className="flex flex-row gap-3 items-center p-3">
+                    <div className="flex flex-row gap-3 items-center">
                         <TbDeviceCctvFilled size={20} />
                         <p className="text-purple font-bold tracking-wider">{camera.name}</p>
                     </div>
-                    <button onClick={() => setShowModal(true)} className="p-3">
-                        <MdEdit size={20} />
-                    </button>
+                    <div className="flex flex-row gap-3 justify-end">
+                        <button onClick={() => setShowUnpairModal(true)} className="p-2">
+                            <AiOutlineDisconnect size={20} />
+                        </button>
+                        <button onClick={() => setShowRenameModal(true)} className="p-2">
+                            <MdEdit size={20} />
+                        </button>
+                    </div>
                 </IconContext.Provider>
             </div>
             <div className="relative">
-                {!camera.connected && 
-                <div className="absolute top-0 left-0 w-full h-full bg-black bg-opacity-60 flex items-center justify-center text-foreground text-8xl">
-                    <VscDebugDisconnect/>
-                </div>}
-            <img src={"data:image/png;base64," + camera.last_frame} alt="" className="w-full h-40 " onClick={onClick} />
+                {!camera.connected &&
+                    <div className="absolute top-0 left-0 w-full h-full bg-black bg-opacity-60 flex items-center justify-center text-foreground text-8xl">
+                        <VscDebugDisconnect />
+                    </div>}
+                <img src={"data:image/png;base64," + camera.last_frame} alt="" className="w-full h-40 " onClick={onClick} />
             </div>
         </div>
     );

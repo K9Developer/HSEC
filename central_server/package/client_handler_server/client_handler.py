@@ -107,7 +107,6 @@ class ClientHandler:
     async def __on_red_zone_trigger(self, mac, frame):
         if mac in self.camera_alert_times and time.time()-self.camera_alert_times[mac] < RED_ZONE_ALERT_COOLDOWN:
             return
-        
 
         self.camera_alert_times[mac] = time.time()
         users_linked = self.db.get_users_using_camera(mac)
@@ -251,23 +250,30 @@ class ClientHandler:
             })
         send_camera_share_email(email, share_email, mac, self.logger)
 
-
     async def __unpair_camera(self, websocket, jdata, email):
+        self.logger.info(f"Unpairing camera for user {email}")
         mac = jdata["mac"]
-        if mac not in self.db.get_linked_cameras(email):
-            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+        # if mac not in self.db.get_linked_cameras(email):
+        #     await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+        #     return
+
+        if mac not in self.camera_server.connected_cameras:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not connected", jdata))
             return
 
-        # self.camera_server.db.remove_camera(mac)
         users_using_camera = self.db.get_users_using_camera(mac)
-        if len(users_using_camera) == 0:
-            camera = self.camera_server.connected_cameras[mac]
-            if camera and camera.client:
-                self.camera_server.camera_server.disconnect_client(camera.client)
-                self.camera_server.connected_cameras.pop(mac, None)
-        
-        self.db.remove_linked_camera(email=jdata["email"], camera_mac=mac)
 
+        if len(users_using_camera) > 1:
+            self.logger.info(f"Camera {mac} is linked to multiple users, removing only for {email}")
+            self.db.remove_linked_camera(email=email, camera_mac=mac)
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera unpaired", jdata))
+            return
+
+        success = self.camera_server.unpair_camera(mac)
+        if not success:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not found or not connected", jdata))
+            return
+        self.db.remove_linked_camera(email=email, camera_mac=mac)
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera unpaired", jdata))
     
     async def __save_polygon(self, websocket, jdata, email):
