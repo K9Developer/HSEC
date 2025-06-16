@@ -1,9 +1,10 @@
-from ast import Constant
 import asyncio
+import io
 import socket
 import time
 import websockets
 from websockets.asyncio.server import serve
+from package.client_handler_server.push_notification_manager import send_notification
 from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email, send_motion_alert_email
 from package.camera_server.camera_server import CameraServer
 from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, ResponseStatus, RED_ZONE_ALERT_COOLDOWN
@@ -12,6 +13,7 @@ from package.socket_server_lib.socket_server import DefaultLogger
 import json
 import base64
 import hashlib
+from PIL import Image
 
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
 # TODO: MULTIPLE USERS NEED TO WORK MEANING IN SERVER_CAMERA IT NEEDS TO HAVE A LIST OF STREAMING CAMERAS
@@ -56,7 +58,8 @@ class ClientHandler:
             "share_camera": self.__share_camera,
 
             "save_polygon": self.__save_polygon,
-            "get_notifications": self.__get_notifications
+            "get_notifications": self.__get_notifications,
+            "send_fcm_token": self.__handle_fcm_token,
         }
 
         self.streaming_transactions = {
@@ -123,10 +126,32 @@ class ClientHandler:
                 "timestamp": int(time.time()),
                 "frame": base64.b64encode(frame).decode()
             })
+
+            # make image 100x100
+            img = Image.open(io.BytesIO(frame)).convert("RGB")   # force JPEG-safe mode
+            img.thumbnail((100, 100), Image.LANCZOS)             # keep aspect ratio, high-quality downscale
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85, optimize=True)  # tweak quality if you want
+            frame = buf.getvalue()  
+
+            fcm_token = self.db.get_fcm_token(email[0])
+            if fcm_token:
+                send_notification(
+                    fcm_token,
+                    "Movement detected",
+                    f"Movement detected on camera {mac}.",
+                    self.logger,
+                    data={
+                        "type": "red_zone_trigger",
+                        "mac": mac,
+                        "frame": "data:image/png;base64," + base64.b64encode(frame).decode(),
+                        "url": "/notifications"
+                    }
+                )
         
         send_motion_alert_email([e[0] for e in users_linked], mac, frame, self.logger)
-            
 
+        
     async def __on_camera_discovered(self, addr, mac):
         # self.logger.info(f"Camera discovered: {mac} ({self.streaming_transactions["discover_cameras"]})")
         for websocket, jdata in self.streaming_transactions["discover_cameras"]:
@@ -142,7 +167,6 @@ class ClientHandler:
     async def __on_camera_paired(self, addr, mac):
         self.logger.info(f"Camera paired: {mac}")
         for websocket, jdata in self.streaming_transactions["paired_cameras"]:
-            print(jdata, mac, jdata["mac"] == mac)
             if jdata["mac"] == mac:
                 await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "ip": addr[0]}, jdata))
                 # self.streaming_transactions["paired_cameras"].remove((websocket, jdata))
@@ -218,7 +242,6 @@ class ClientHandler:
     async def __rename_camera(self, websocket, jdata, email):
         mac = jdata["mac"]
         if mac not in self.db.get_linked_cameras(email):
-            print("Camera not linked:", mac, self.db.get_linked_cameras(email))
             await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
             return
         new_name = jdata["new_name"]
@@ -301,13 +324,26 @@ class ClientHandler:
         self.logger.info(f"Sending {len(notifications)} notifications to {email}")
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, notifications, jdata))
 
+    async def __handle_fcm_token(self, websocket, jdata, email):
+        if email is None:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Please login first", jdata))
+            return
+        
+        fcm_token = jdata.get("token")
+        if not fcm_token:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "No FCM token provided", jdata))
+            return
+        
+        self.db.set_fcm_token(email, fcm_token)
+        self.logger.info(f"Updated FCM token for {email}")
+
+
     # ---- accoutn stuff ----
 
     async def __handle_password_login(self, websocket, jdata, _):
         email = jdata["email"]
         password = jdata["password"] + self.db.get_salt(email)
         password = self.__hash_password(password)
-        print(f"Password for {email}: {jdata["password"]} + {self.db.get_salt(email)}")
         success = self.db.is_correct_password(email, password)
         if not success:
             self.logger.error(f"Invalid password for user {email}")

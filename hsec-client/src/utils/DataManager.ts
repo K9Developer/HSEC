@@ -4,7 +4,7 @@
 import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse } from "../types";
 
 export type DataEvent = "frame" | "camera_discovered" | "red_zone_trigger"
-export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications";
+export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token";
 
 const SERVER_PORT = 34531
 
@@ -387,6 +387,20 @@ export class DataManager {
             DataManager.sendRequest("reset_password", { email, reset_code, new_password }, (data) => {
                 if (data.error) resolve({ success: false, reason: data.error });
                 else resolve({ success: data.status === "success", reason: data.data.info || "" });
+            })
+        });
+    }
+
+    static async sendFCMToken(token: string): Promise<{ success: boolean; info: string }> {
+        return new Promise((resolve, reject) => {
+            if (!DataManager.isConnected()) {
+                reject(new Error("Not connected to server"));
+                return;
+            }
+
+            DataManager.sendRequest("send_fcm_token", { token }, (data) => {
+                if (data.error) resolve({ success: false, info: data.data });
+                else resolve({ success: data.status === "success", info: data.data});
             })
         });
     }

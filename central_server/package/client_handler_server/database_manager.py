@@ -40,7 +40,8 @@ class UserDatabase:
                 salt TEXT DEFAULT '',
                 reset_code TEXT DEFAULT '',
                 reset_code_expiry INTEGER,
-                notifications TEXT DEFAULT '[]'
+                notifications TEXT DEFAULT '[]',
+                fcm_token TEXT DEFAULT ''
             )
         ''')
         conn.commit()
@@ -61,12 +62,26 @@ class UserDatabase:
         password_hash = self.__hash_password(psw, salt)
         print(f"Password for {email}: {psw} + {salt}")
         cursor.execute('''
-            INSERT OR REPLACE INTO users (email, password_hash, active_session_id, session_expiry, linked_cameras, salt, notifications)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (email, password_hash, sess, expiry, '', salt, '[]'))
+            INSERT OR REPLACE INTO users (email, password_hash, active_session_id, session_expiry, linked_cameras, salt, notifications, fcm_token)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (email, password_hash, sess, expiry, '', salt, '[]', ''))
         conn.commit()
         return sess, expiry
     
+    def get_fcm_token(self, email):
+        _, cursor = self._get_conn()
+        cursor.execute('SELECT fcm_token FROM users WHERE email = ?', (email,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        return None
+    
+    def set_fcm_token(self, email, fcm_token):
+        conn, cursor = self._get_conn()
+        cursor.execute('UPDATE users SET fcm_token = ? WHERE email = ?', (fcm_token, email))
+        conn.commit()
+        return True
+
     def get_salt(self, email):
         _, cursor = self._get_conn()
         cursor.execute('SELECT salt FROM users WHERE email = ?', (email,))

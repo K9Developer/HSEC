@@ -14,21 +14,7 @@ import Input from "./components/Input.tsx";
 import Modal from "./components/Modal.tsx";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
 import NotificationPage from "./pages/NotificationPage.tsx";
-
-const requestNotificationPermission = async () => {
-    if ("Notification" in window && Notification.permission !== "granted") {
-        try {
-            const permission = await Notification.requestPermission();
-            if (permission === "granted") {
-                console.log("Notification permission granted");
-            } else {
-                console.warn("Notification permission denied");
-            }
-        } catch (error) {
-            console.error("Failed to request notification permission:", error);
-        }
-    }
-}
+import { getFCMToken } from "./utils.ts";
 
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
@@ -36,6 +22,23 @@ const App = () => {
     const [currServerCode, setCurrServerCode] = useState("");
     const [connectingToServer, setConnectingToServer] = useState(false);
     const [connected, setConnected] = useState(false);
+
+    const handleFCMToken = async () => {
+        console.log("Requesting notification permission...");
+        const fcmToken = await getFCMToken();
+        if (fcmToken) {
+            try {
+                const response = await DataManager.sendFCMToken(fcmToken);
+                if (!response.success) console.error("Failed to send FCM token:", response.info);
+                else console.log("FCM token sent successfully");
+            } catch (error) {
+                console.error("Error sending FCM token:", error);
+            }
+        } else {
+            console.warn("FCM token is null, notifications may not work properly.");
+        }
+        return fcmToken;
+    }
 
     const handleAutoLogin = async () => {
         console.log("Checking for local user...");
@@ -78,6 +81,10 @@ const App = () => {
         if (localUser && !user) {
             handleAutoLogin();
         }
+
+        if (user?.logged_in) {
+            handleFCMToken()
+        }
     }, [user]);
 
     const connect = async (serverCode: string) => {
@@ -103,14 +110,13 @@ const App = () => {
 
     useEffect(() => {
         const func = async () => {
-            console.log("Checking connection status: ", connected);
             const code = localStorage.getItem("server_code");
             if (code) {
                 const succ = await connect(code);
                 if (!succ) {
                     setShowServerCode(true);
                     console.log(1111111111111111, window.location.href)
-                    if (window.location.pathname !== "/") window.location.href = "/";
+                    // if (window.location.pathname !== "/") window.location.href = "/";
                 }
             }
 
@@ -119,7 +125,7 @@ const App = () => {
                 handleAutoLogin();
             } else {
                 setShowServerCode(true);
-                if (window.location.pathname !== "/") window.location.href = "/";
+                // if (window.location.pathname !== "/") window.location.href = "/";
             }
         }
 
