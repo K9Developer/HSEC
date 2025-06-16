@@ -212,13 +212,23 @@ const AnimatedQRScanner: React.FC<AnimatedQRScannerProps> = ({
     const vw = videoRef.current.videoWidth;
     const vh = videoRef.current.videoHeight;
     const scale = Math.max(containerSize / vw, containerSize / vh);
-    const dispW = vw * scale;
-    const dispH = vh * scale;
-    const offX = (containerSize - dispW) / 2;
-    const offY = (containerSize - dispH) / 2;
+    const videoDisplayWidth = vw * scale;
+    const videoDisplayHeight = vh * scale;
+    const offX = (containerSize - videoDisplayWidth) / 2;
+    const offY = (containerSize - videoDisplayHeight) / 2;
 
-    // Coordinates of QR corners within displayed video
-    const dispPts = scanHit.cornerPoints.map<Point>(p => ({
+    // Sort corner points for consistent orientation handling.
+    // This sort should match the internal sort of grabStraightQuad.
+    const { cornerPoints: rawCornerPoints } = scanHit;
+    const centroidX = rawCornerPoints.reduce((s, p) => s + p.x, 0) / 4;
+    const centroidY = rawCornerPoints.reduce((s, p) => s + p.y, 0) / 4;
+    
+    const sortedCornerPoints = [...rawCornerPoints].sort(
+      (a, b) => Math.atan2(a.y - centroidY, a.x - centroidX) - Math.atan2(b.y - centroidY, b.x - centroidX)
+    );
+
+    // Coordinates of sorted QR corners within displayed video
+    const sortedDispPts = sortedCornerPoints.map<Point>(p => ({
       x: p.x * scale + offX,
       y: p.y * scale + offY,
     }));
@@ -232,14 +242,14 @@ const AnimatedQRScanner: React.FC<AnimatedQRScannerProps> = ({
     hudCtx.save();
     hudCtx.translate(offX, offY);
     hudCtx.scale(scale, scale);
-    hudCtx.drawImage(videoRef.current, 0, 0);
+    hudCtx.drawImage(videoRef.current, 0, 0); // Draw the video frame onto the HUD
     hudCtx.restore();
 
     hudCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
     hudCtx.lineWidth = 4;
     hudCtx.beginPath();
-    hudCtx.moveTo(dispPts[0].x, dispPts[0].y);
-    dispPts.slice(1).forEach(p => hudCtx.lineTo(p.x, p.y));
+    hudCtx.moveTo(sortedDispPts[0].x, sortedDispPts[0].y); // Use sorted points for drawing
+    sortedDispPts.slice(1).forEach(p => hudCtx.lineTo(p.x, p.y));
     hudCtx.closePath();
     hudCtx.stroke();
 
@@ -249,6 +259,8 @@ const AnimatedQRScanner: React.FC<AnimatedQRScannerProps> = ({
     frameCanvas.height = vh;
     frameCanvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
 
+    // grabStraightQuad is called with the original (unsorted by this effect) cornerPoints,
+    // as it performs its own sorting internally. This internal sort matches the one above.
     const patch = grabStraightQuad(frameCanvas.getContext('2d')!, scanHit.cornerPoints as Point[]);
     if (!patch || patch.width === 0 || patch.height === 0) return;
 
@@ -262,17 +274,19 @@ const AnimatedQRScanner: React.FC<AnimatedQRScannerProps> = ({
     patchRef.current = patchCan;
 
     // ── Prepare animation keyframes ────────────────────────────────
-    const bbox = getBoundingBox(dispPts);
-    const initialW = Math.hypot(dispPts[1].x - dispPts[0].x, dispPts[1].y - dispPts[0].y);
-    const initialH = Math.hypot(dispPts[3].x - dispPts[0].x, dispPts[3].y - dispPts[0].y);
-    const initialAngle = getAngle(dispPts[0], dispPts[1]);
+    // Use sortedDispPts for bounding box and initial transform parameters
+    const bbox = getBoundingBox(sortedDispPts);
+    const initialW = Math.hypot(sortedDispPts[1].x - sortedDispPts[0].x, sortedDispPts[1].y - sortedDispPts[0].y);
+    const initialH = Math.hypot(sortedDispPts[3].x - sortedDispPts[0].x, sortedDispPts[3].y - sortedDispPts[0].y); // Assuming p0-p3 is a side after clockwise sort
+    const initialAngle = getAngle(sortedDispPts[0], sortedDispPts[1]); // Angle of the first edge (p0-p1) of the sorted points
 
     const targetSize = Math.min(containerSize * 0.7, Math.max(containerSize * 0.4, 200));
     const endScale = targetSize / Math.max(patchCan.width, patchCan.height);
     const endX = (containerSize - patchCan.width * endScale) / 2;
     const endY = (containerSize - patchCan.height * endScale) / 2;
 
-    // Place at starting pose
+    // Place at starting pose. All parameters (bbox, initialW, initialH, initialAngle)
+    // are now derived from the consistently sorted corner points.
     patchCan.style.transform = `translate(${bbox.minX}px,${bbox.minY}px) rotate(${initialAngle}rad) scale(${initialW / patchCan.width},${initialH / patchCan.height})`;
 
     /** ── Animate with rAF ─────────────────────────────────────────*/
