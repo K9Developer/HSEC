@@ -1,7 +1,6 @@
 #include "camera/camera.h"
 #include "esp_log.h"
 
-// show *everything* from the camera driver
 Camera* c;
 uint8_t mac[6] = { 0x12, 0x34, 0x56, 0xF2, 0x1C, 0x84 };
 void setup() {

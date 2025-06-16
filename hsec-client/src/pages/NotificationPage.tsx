@@ -35,7 +35,9 @@ const NotificationPage = () => {
         // get notifs
         DataManager.getNotifications().then((notifs) => {
             if (notifs.success) {
-                setNotifications(notifs.notifications);
+                const n = notifs.notifications
+                n.reverse(); 
+                setNotifications(n);
             } else {
                 console.error("Failed to fetch notifications:", notifs.info);
             }

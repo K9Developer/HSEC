@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { Camera } from "../types";
 import { PuffLoader } from "react-spinners";
@@ -11,13 +11,11 @@ import Modal from "../components/Modal";
 import Input from "../components/Input";
 import { PiPolygonBold } from "react-icons/pi";
 import { TbPolygonOff } from "react-icons/tb";
-import { BiStopCircle } from "react-icons/bi";
 
 // Add modal with email
 
 let timeout: null | number = null;
 const img = new Image();
-let firstFrame = true;
 
 const CameraViewer = () => {
     const { cameraId } = useParams();
@@ -28,21 +26,32 @@ const CameraViewer = () => {
     const [loadingShare, setLoadingShare] = React.useState<boolean>(false);
     const [recordingPolygon, setRecordingPolygon] = React.useState<boolean>(false);
     const [askSavePolygon, setAskSavePolygon] = React.useState<boolean>(false);
-    const [imageSize, setImageSize] = React.useState<{ width: number; height: number }>({ width: 0, height: 0 });
+    // const [imageWidth, setImageSize] = React.useState<{ width: number; height: number }>({ width: 0, height: 0 });
+    const [imageWidth, setImageSize] = React.useState<number>(0);
+    const [imageHeight, setImageHeight] = React.useState<number>(0);
     const [polygonPoints, setPolygonPoints] = React.useState<[number, number][]>([]);
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const presetPolygonPoints = useRef<boolean>(false);
+    const firstFrame = useRef<boolean>(true);
+    let resizedCurrPoints = useRef<boolean>(false);
     const mac = useRef<string | null>(null);
     const navigate = useNavigate();
     // const [streaming, setStreaming] = React.useState<boolean>(false);
 
+    const resizePolygonPoints = (points: [number, number][]) => {
+        if (!canvasRef.current) return points;
+        const rect = canvasRef.current.getBoundingClientRect();
+        return points.map(point => [
+            Math.round(point[0] * (rect.width / imageWidth)),
+            Math.round(point[1] * (rect.height / imageHeight))
+        ]);
+    }
+
     useEffect(() => {
         if (!camera?.red_zone) return;
         // if (presetPolygonPoints?.current) return;
-        console.log(camera?.red_zone, camera.red_zone.length)
         if (camera?.red_zone && camera.red_zone.length > 0) {
-            console.log(camera.red_zone)
             setPolygonPoints(camera.red_zone.map(point => [point[0], point[1]]));
             presetPolygonPoints.current = true;
         }
@@ -75,7 +84,6 @@ const CameraViewer = () => {
     };
 
     useEffect(() => {
-        console.log("Canvas points updated:", polygonPoints);
         const canvas = canvasRef.current;
         if (!canvas) {
             console.error("Canvas element not found");
@@ -87,8 +95,8 @@ const CameraViewer = () => {
             console.error("Failed to get canvas context");
             return;
         }
-
         const rect = canvas.getBoundingClientRect();
+
         canvas.width = rect.width;
         canvas.height = rect.height;
 
@@ -115,19 +123,28 @@ const CameraViewer = () => {
                 ctx.fill();
             });
         }
-    }, [polygonPoints, canvasRef.current, imageSize]);
+    }, [polygonPoints, canvasRef.current, imageWidth]);
 
+    useLayoutEffect(() => {
+        if (resizedCurrPoints.current) return;
+        if (!canvasRef.current || polygonPoints.length === 0 || !imageWidth) return;
+        resizedCurrPoints.current = true;
+        const newPoints = resizePolygonPoints(polygonPoints);
+        setPolygonPoints(newPoints as any)
+    }, [imageWidth, imageHeight, canvasRef.current, polygonPoints]);
 
     const onFrame = (data: any) => {
         if (timeout) clearTimeout(timeout);
         const newSourceUrl = `data:image/jpeg;base64,${data.frame}`;
-        if (firstFrame) {
+        if (firstFrame.current) {
             console.log("Setting initial image size from new source URL");
             img.src = newSourceUrl;
             img.onload = () => {
-                setImageSize({ width: img.width, height: img.height });
+                console.log("Image loaded:", img.width, img.height);
+                setImageSize(img.width);
+                setImageHeight(img.height);
             };
-            firstFrame = false;
+            firstFrame.current = false;
         }
 
         setCurrentSourceUrl(newSourceUrl);
@@ -158,7 +175,6 @@ const CameraViewer = () => {
                 return;
             }
             setCamera(cameraData);
-            console.log("Camera data (start):", cameraData);
             // setStreaming(true);
             let res = await DataManager.startStreamCamera(cameraData.mac);
             if (!res.success) {
@@ -187,8 +203,6 @@ const CameraViewer = () => {
             }
         }, 5000);
 
-
-
         return () => {
             DataManager.stopStreamCamera(mac.current!);
             DataManager.removeEventListener("frame");
@@ -216,7 +230,20 @@ const CameraViewer = () => {
                         onClick={() => {
                             // Save polygon logic here
                             setAskSavePolygon(false);
-                            DataManager.savePolygon(camera.mac, polygonPoints).then((res: any) => {
+                            const canvas = canvasRef.current;
+                            if (!canvas) {
+                                alert("Canvas not available. Please try again.");
+                                return;
+                            }
+                            const rect = canvas.getBoundingClientRect();
+                            const resizedPoints = polygonPoints.map(point => {
+                                return [
+                                    Math.round(point[0] * (imageWidth / rect.width)),
+                                    Math.round(point[1] * (imageHeight / rect.height))
+                                ];
+                            });
+
+                            DataManager.savePolygon(camera.mac, resizedPoints as any).then((res: any) => {
                                 if (res.success) {
                                     alert("Polygon saved successfully!");
                                     setRecordingPolygon(false);
@@ -292,7 +319,7 @@ const CameraViewer = () => {
             <div className="flex flex-col justify-between h-full pb-4 px-2">
                 <div className="mt-2 p-2">
                     <div className="rounded-xl bg-lightpurple w-full relative" style={{
-                        aspectRatio: imageSize.width / imageSize.height,
+                        aspectRatio: imageWidth / imageHeight,
                     }}>
                         <img src={currentSourceUrl} alt="Camera Feed" className="w-full h-full" />
                         <canvas className="w-full absolute top-0 left-0 h-full rounded-md bg-transparent" id="cameraCanvas" ref={canvasRef} onClick={handleCanvasClick} />

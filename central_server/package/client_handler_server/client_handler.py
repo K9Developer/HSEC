@@ -113,6 +113,13 @@ class ClientHandler:
 
         self.camera_alert_times[mac] = time.time()
         users_linked = self.db.get_users_using_camera(mac)
+
+        img = Image.open(io.BytesIO(frame)).convert("RGB")   # force JPEG-safe mode
+        img.thumbnail((100, 100), Image.LANCZOS)             # keep aspect ratio, high-quality downscale
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)  # tweak quality if you want
+        b64_small_frame = buf.getvalue()  
+
         for email in users_linked:
             websocket = self.connected_sessions.get(email[0])
             if websocket:
@@ -125,14 +132,7 @@ class ClientHandler:
                 "mac": mac,
                 "timestamp": int(time.time()),
                 "frame": base64.b64encode(frame).decode()
-            })
-
-            # make image 100x100
-            img = Image.open(io.BytesIO(frame)).convert("RGB")   # force JPEG-safe mode
-            img.thumbnail((100, 100), Image.LANCZOS)             # keep aspect ratio, high-quality downscale
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85, optimize=True)  # tweak quality if you want
-            frame = buf.getvalue()  
+            })            
 
             fcm_token = self.db.get_fcm_token(email[0])
             if fcm_token:
@@ -144,7 +144,7 @@ class ClientHandler:
                     data={
                         "type": "red_zone_trigger",
                         "mac": mac,
-                        "frame": "data:image/png;base64," + base64.b64encode(frame).decode(),
+                        "frame": "data:image/png;base64," + base64.b64encode(b64_small_frame).decode(),
                         "url": "/notifications"
                     }
                 )
@@ -307,10 +307,12 @@ class ClientHandler:
         
         polygon = jdata["polygon"]
         if not isinstance(polygon, list) or len(polygon) < 3:
-            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Invalid polygon data", jdata))
+            self.camera_server.db.set_red_zone(mac, "[]")
+            if mac in self.camera_server.last_redzones: del self.camera_server.last_redzones[mac]
             return
 
         self.camera_server.db.set_red_zone(mac, json.dumps(polygon))
+        if mac in self.camera_server.last_redzones: del self.camera_server.last_redzones[mac]
         self.camera_server.connected_cameras[mac].red_zone = polygon
         self.logger.info(f"Polygon saved for camera {mac} with {len(polygon)} points")
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Polygon saved", jdata))

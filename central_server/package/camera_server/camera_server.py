@@ -1,4 +1,6 @@
+from collections import deque
 import io
+import math
 import time
 
 from ..socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
@@ -9,7 +11,7 @@ import threading
 from Cryptodome.Util.Padding import pad, unpad
 from Cryptodome.Cipher import AES
 import time
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 import imagehash
 from queue import Queue
 
@@ -29,6 +31,79 @@ def cut_polygon_from_image(image: Image.Image, polygon: list[list[int]]) -> Imag
     bbox = (min(xs), min(ys), max(xs), max(ys))
     return red_zone.crop(bbox)
 
+
+def _blobs(prev: Image.Image, curr: Image.Image, noise_floor: int = 8, blur_radius: int = 2):
+
+    w, h = curr.size
+    g1 = prev.convert("L").filter(ImageFilter.BoxBlur(blur_radius))
+    g2 = curr.convert("L").filter(ImageFilter.BoxBlur(blur_radius))
+    m1, m2 = g1.tobytes(), g2.tobytes()
+
+    mask = [1 if abs(a - b) > noise_floor else 0 for a, b in zip(m1, m2)]
+    visited = [0] * len(mask)
+    stride = w
+
+    for i, moved in enumerate(mask):
+        if not moved or visited[i]:
+            continue
+
+        area     = 0
+        min_x, min_y = w, h
+        max_x, max_y = -1, -1
+        stack = deque([i])
+
+        while stack:
+            idx = stack.pop()
+            if visited[idx]:
+                continue
+            visited[idx] = 1
+            if not mask[idx]:
+                continue
+
+            area += 1
+            y, x = divmod(idx, stride)
+            if x < min_x: min_x = x
+            if x > max_x: max_x = x
+            if y < min_y: min_y = y
+            if y > max_y: max_y = y
+
+            if x > 0: stack.append(idx - 1)
+            if x < w - 1: stack.append(idx + 1)
+            if y > 0: stack.append(idx - w)
+            if y < h - 1: stack.append(idx + w)
+
+        bbox_area = (max_x - min_x + 1) * (max_y - min_y + 1)
+        yield area, bbox_area
+
+def has_motion(prev: Image.Image, curr: Image.Image) -> bool:
+
+    w, h = curr.size
+    roi_px = w * h
+    pct_thresh = Constants.RED_ZONE_SIMILARITY_THRESHOLD
+    px_needed = math.ceil(roi_px * pct_thresh / 100)
+
+    min_blob_px = 10
+    total_changed = 0
+
+    for area, bbox_area in _blobs(prev, curr):
+        if area < min_blob_px:
+            continue
+
+        if area >= px_needed:
+            score = (area * 100) / roi_px
+            return True, score
+
+        if bbox_area >= px_needed:
+            score = (bbox_area * 100) / roi_px
+            return True, score
+
+        total_changed += area
+        if total_changed >= px_needed:
+            score = (total_changed * 100) / roi_px
+            return True, score
+
+    score = (total_changed * 100) / roi_px
+    return False, score
 
 class CameraServer:
     def __init__(self, callbacks: dict, logger=DefaultLogger()):
@@ -60,7 +135,7 @@ class CameraServer:
         self.last_frame_update_time = {}
 
         self.frame_queue = Queue()
-        self.last_redzone_hashes = {} # {mac: (hash, frames_passed)}
+        self.last_redzones = {} # {mac: (hash, frames_passed)}
 
         self.db = CameraDatabase()
 
@@ -232,15 +307,21 @@ class CameraServer:
 
     def __get_camera_by_ip(self, camera_ip):
         for camera in self.connected_cameras.values():
+            # print(camera.client.addr, camera_ip)
             if camera.client is None:
                 self.logger.error(f"Camera {camera.mac} client is None")
                 continue
             if camera.client.addr[0] == camera_ip:
                 return camera
+        
         return None
 
     def __on_camera_disconnect(self, camera_cli):
         camera = self.__get_camera_by_ip(camera_cli.addr[0])
+
+        if camera.mac in self.last_frame_update_time: del self.last_frame_update_time[camera.mac]
+        if camera.mac in self.last_redzones: del self.last_redzones[camera.mac]
+        
         if camera is None:
             self.logger.error(f"Camera {camera_cli.addr[0]} not found in connected cameras")
             return
@@ -273,19 +354,24 @@ class CameraServer:
 
             if camera.mac not in self.connected_cameras: continue
             
-            image = Image.open(io.BytesIO(frame)).convert("RGB")
+            image = Image.open(io.BytesIO(frame))
             polygon = camera.red_zone
             red_zone_cut = cut_polygon_from_image(image, polygon)
 
-            red_zone_hash = perceptual_hash(red_zone_cut)
+            triggered = False
 
-            if camera.mac in self.last_redzone_hashes:
-                distance = distance_between_hashes(red_zone_hash, self.last_redzone_hashes[camera.mac][0])
-                
-                if distance >= Constants.RED_ZONE_SIMILARITY_THRESHOLD:
-                    self.callbacks["on_red_zone_trigger"](camera.mac, frame)
+            if camera.mac in self.last_redzones:
+                motion, score = has_motion(self.last_redzones[camera.mac][0][0], red_zone_cut)
+                if motion: triggered = True
+            else:
+                self.last_redzones[camera.mac] = [[], 0]
 
-            self.last_redzone_hashes[camera.mac] = [red_zone_hash, 0]
+            if not triggered: self.last_redzones[camera.mac][0].append(red_zone_cut)
+            if len(self.last_redzones[camera.mac][0]) > Constants.FRAMES_BETWEEN_COMPARISONS:
+                self.last_redzones[camera.mac][0].pop(0)
+
+            if triggered:
+                self.callbacks["on_red_zone_trigger"](camera.mac, frame)
 
 
     def __handle_frame(self, camera_cli, fields):
@@ -300,15 +386,16 @@ class CameraServer:
             self.callbacks["on_camera_frame"](camera.mac, frame)
         
         check_red_zone = False
-        if camera.mac in self.last_redzone_hashes: 
-            self.last_redzone_hashes[camera.mac][1] += 1
-            if self.last_redzone_hashes[camera.mac][1] >= Constants.FRAMES_BETWEEN_RED_ZONE_CHECKS:
-                self.last_redzone_hashes[camera.mac][1] = 0
+        if camera.mac in self.last_redzones: 
+            self.last_redzones[camera.mac][1] += 1
+            if self.last_redzones[camera.mac][1] >= Constants.FRAMES_BETWEEN_RED_ZONE_CHECKS:
+                self.last_redzones[camera.mac][1] = 0
                 check_red_zone = True
         else:
             check_red_zone = True
 
-        if camera.red_zone is not None and check_red_zone: self.frame_queue.put((camera, frame))
+        if camera.red_zone is not None and check_red_zone:
+            self.frame_queue.put((camera, frame))
         if self.last_frame_update_time.get(camera.mac) and time.time() - self.last_frame_update_time.get(camera.mac, 0) < Constants.STATIC_CAMERA_FRAME_UPDATE_INTERVAL:
             self.logger.debug(f"Skipping frame update for camera {camera.mac} due to rate limiting")
             return
@@ -329,6 +416,7 @@ class CameraServer:
                 if camera is None:
                     self.logger.error(f"Camera {camera_mac} not found in database")
                     return
+                
                 camera.client = camera_cli
                 camera.client.transfer_options = constants.DataTransferOptions.WITH_SIZE | constants.DataTransferOptions.ENCRYPT_AES
                 camera.client.random = camera.key
@@ -383,8 +471,8 @@ class CameraServer:
             
             camera_name = f"HSEC {''.join(camera_mac.split(':')[-3:])}"
             camera = self.db.add_camera(camera_mac, camera_name, camera_cli.random, camera_cli.addr[0])
-            self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
             camera.client = camera_cli
+            self.cameras_awaiting_pairing.remove(camera_cli.addr[0])
             self.connected_cameras[camera_mac] = camera
             self.callbacks["on_camera_paired"](camera_cli.addr, camera_mac)
             self.logger.info(f"Camera {camera_mac} paired successfully with IP {camera_cli.addr[0]}")

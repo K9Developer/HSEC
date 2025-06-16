@@ -351,6 +351,7 @@ public:
             this->current_state |= REPEAIRING;
             this->tcp_soc->tcp_client.stop();
         };
+        delay(1000);
     }
 
     void steam_camera() {
@@ -430,6 +431,7 @@ public:
             this->current_state |= DISCOVERING;
             _purge_server();
         }
+        delay(1000);
     }
 
     bool had_server() {

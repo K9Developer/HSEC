@@ -163,6 +163,7 @@ const App = () => {
                                 setCurrServerCode("");
                                 setConnectingToServer(false);
                                 localStorage.setItem("server_code", currServerCode);
+                                if (window.location.pathname !== "/") window.location.href = "/";
                             }).catch((err) => {
                                 console.error("Failed to connect to server:", err);
                                 alert("Failed to connect to server. Please check the server code and try again.");

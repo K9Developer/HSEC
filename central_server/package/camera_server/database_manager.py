@@ -47,6 +47,12 @@ class CameraDatabase:
         cursor.execute('DELETE FROM cameras WHERE mac = ?', (mac,))
         conn.commit()
 
+    def get_camera_by_ip(self, ip):
+        _, cursor = self._get_conn()
+        cursor.execute('SELECT * FROM cameras WHERE last_known_ip = ?', (ip,))
+        row = cursor.fetchone()
+        return Camera(*row) if row else None
+
     def add_camera(self, mac, name, key, last_known_ip):
         mac = mac.decode() if isinstance(mac, bytes) else mac
 
