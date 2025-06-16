@@ -7,6 +7,7 @@ import { IconContext } from "react-icons";
 import { DataManager } from "../utils/DataManager";
 import Button from "../components/Button";
 import Input from "../components/Input";
+import showPopup from "../utils/Popupmanager";
 
 const PasswordResetPage = ({ email, onSuccess, timeLeft }: { email: string, onSuccess: any, timeLeft: number }) => {
     const [code, setCode] = React.useState("");
@@ -65,10 +66,10 @@ const PasswordResetPage = ({ email, onSuccess, timeLeft }: { email: string, onSu
                         DataManager.resetPassword(email, code, password).then((res: any) => {
                             setLoading(false);
                             if (res.success) {
-                                alert("Password reset successfully. You can now log in with your new password.");
+                                showPopup("Password reset successfully!", "success");
                                 onSuccess();
                             } else {
-                                alert("Failed to reset password: " + res.reason);
+                                showPopup("Failed to reset password: " + res.reason, "error");
                             }
                         }
                         )
@@ -97,7 +98,7 @@ const ForgotPasswordPage = () => {
                     if (prev <= 0) {
                         clearInterval(timer);
                         navigate("/account");
-                        alert("Code expired. Please request a new code.");
+                        showPopup("Code expired. Please request a new code.", "error");
                         return 0;
                     }
                     return prev - 1;
@@ -147,12 +148,12 @@ const ForgotPasswordPage = () => {
                             DataManager.requestPasswordReset(email).then((res: any) => {
                                 setLoading(false);
                                 if (res.success) {
-                                    alert("Code sent to your email. Please check your inbox.");
+                                    showPopup("Code sent to " + email, "success");
                                     setTimeRemaining(res.timeLeft);
                                     setAwaitingCode(true);
                                     setLoading(false);
                                 } else {
-                                    alert("Failed to send code: " + res.reason);
+                                    showPopup("Failed to send code: " + res.reason, "error");
                                     setLoading(false);
                                 }
                             })

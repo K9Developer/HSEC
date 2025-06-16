@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { DataManager } from "../utils/DataManager";
 import Button from "../components/Button";
 import UserContext from "../contexts/UserContext";
+import showPopup from "../utils/Popupmanager";
 
 interface LoggedInProps {
     user: User;
@@ -104,7 +105,7 @@ const AccountPage = () => {
         const { token, success, reason } = await DataManager.passLogin(email, password);
 
         if (!success) {
-            alert(reason);
+            showPopup("Login failed: " + reason, "error");
             return;
         }
 
@@ -120,7 +121,7 @@ const AccountPage = () => {
     const handleCreateAccount = async (email: string, password: string) => {
         const { token, success, reason } = await DataManager.createAccount(email, password);
         if (!success) {
-            alert(reason);
+            showPopup("Account creation failed: " + reason, "error");
             return;
         }
         const user = {

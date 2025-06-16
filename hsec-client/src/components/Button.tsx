@@ -7,9 +7,10 @@ interface Props {
     disabled?: boolean;
     className?: string;
     icon?: React.ElementType; 
+    secondary?: boolean;
 }
 
-const Button = ({ text, onClick, isLoading, disabled, className, icon: Icon }: Props) => {
+const Button = ({ text, onClick, isLoading, disabled, className, secondary=false, icon: Icon }: Props) => {
     return (
         <button
             onClick={onClick}
@@ -17,6 +18,7 @@ const Button = ({ text, onClick, isLoading, disabled, className, icon: Icon }: P
             className={
                 "font-semibold py-2 rounded-lg h-10 flex justify-center px-2 " +
                 (disabled ? "bg-inherit border-lightpurple border-[1px] text-lightpurple " : "bg-lightblue ") +
+                (secondary ? "text-foreground bg-darkblue " : "") +
                 className
             }
         >

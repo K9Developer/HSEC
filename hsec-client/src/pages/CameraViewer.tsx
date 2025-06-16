@@ -11,6 +11,7 @@ import Modal from "../components/Modal";
 import Input from "../components/Input";
 import { PiPolygonBold } from "react-icons/pi";
 import { TbPolygonOff } from "react-icons/tb";
+import showPopup from "../utils/Popupmanager";
 
 // Add modal with email
 
@@ -24,8 +25,8 @@ const CameraViewer = () => {
     const [currentSourceUrl, setCurrentSourceUrl] = React.useState<string>("");
     const [shareEmail, setShareEmail] = React.useState<string>("");
     const [loadingShare, setLoadingShare] = React.useState<boolean>(false);
-    const [recordingPolygon, setRecordingPolygon] = React.useState<boolean>(false);
-    const [askSavePolygon, setAskSavePolygon] = React.useState<boolean>(false);
+    const [recordingPolygon, setRecordingRedzone] = React.useState<boolean>(false);
+    const [askSavePolygon, setAskSaveRedzone] = React.useState<boolean>(false);
     // const [imageWidth, setImageSize] = React.useState<{ width: number; height: number }>({ width: 0, height: 0 });
     const [imageWidth, setImageSize] = React.useState<number>(0);
     const [imageHeight, setImageHeight] = React.useState<number>(0);
@@ -63,9 +64,11 @@ const CameraViewer = () => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
+        resizedCurrPoints.current = true;
         const rect = canvas.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
+        console.log("Canvas clicked at:", x, y);
 
         setPolygonPoints(prevPoints => {
             if (prevPoints.length === 0) return [[x, y]];
@@ -95,6 +98,9 @@ const CameraViewer = () => {
             console.error("Failed to get canvas context");
             return;
         }
+
+        console.log("Drawing polygon points:", polygonPoints);
+
         const rect = canvas.getBoundingClientRect();
 
         canvas.width = rect.width;
@@ -128,6 +134,7 @@ const CameraViewer = () => {
     useLayoutEffect(() => {
         if (resizedCurrPoints.current) return;
         if (!canvasRef.current || polygonPoints.length === 0 || !imageWidth) return;
+        console.log("Resizing polygon points due to image size change:", imageWidth, imageHeight);
         resizedCurrPoints.current = true;
         const newPoints = resizePolygonPoints(polygonPoints);
         setPolygonPoints(newPoints as any)
@@ -179,14 +186,14 @@ const CameraViewer = () => {
             let res = await DataManager.startStreamCamera(cameraData.mac);
             if (!res.success) {
                 console.error("Failed to start camera stream:", res.info);
-                alert("Failed to start camera stream: " + res.info);
+                showPopup("Failed to start camera stream: " + res.info, "error");
                 navigate("/");
                 return;
             }
             mac.current = cameraData.mac;
         } catch (error) {
             console.error("Error fetching camera data:", error);
-            alert("Failed to fetch camera data. Please try again later.");
+            showPopup("Error fetching camera data: " + error.message, "error");
             navigate("/");
         }
     }
@@ -198,7 +205,7 @@ const CameraViewer = () => {
 
         timeout = setTimeout(() => {
             if (!camera || !currentSourceUrl) {
-                alert("Failed to load camera feed. Please try again later.");
+                showPopup("Failed to load camera feed. Please try again later.", "error");
                 navigate("/");
             }
         }, 5000);
@@ -221,7 +228,7 @@ const CameraViewer = () => {
     return (
         <div className="flex flex-col bg-darkpurple h-full">
 
-            <Modal visible={askSavePolygon} onClose={() => setAskSavePolygon(false)}>
+            <Modal visible={askSavePolygon} onClose={() => setAskSaveRedzone(false)}>
                 <p className="text-foreground text-sm">Do you want to save the polygon?</p>
                 <div className="flex flex-row gap-2 mt-4">
                     <Button
@@ -229,10 +236,10 @@ const CameraViewer = () => {
                         className="w-full"
                         onClick={() => {
                             // Save polygon logic here
-                            setAskSavePolygon(false);
+                            setAskSaveRedzone(false);
                             const canvas = canvasRef.current;
                             if (!canvas) {
-                                alert("Canvas not available. Please try again.");
+                                showPopup("Canvas not available. Please try again.", "error");
                                 return;
                             }
                             const rect = canvas.getBoundingClientRect();
@@ -243,13 +250,11 @@ const CameraViewer = () => {
                                 ];
                             });
 
-                            DataManager.savePolygon(camera.mac, resizedPoints as any).then((res: any) => {
+                            DataManager.saveRedzone(camera.mac, resizedPoints as any).then((res: any) => {
                                 if (res.success) {
-                                    alert("Polygon saved successfully!");
-                                    setRecordingPolygon(false);
-                                } else {
-                                    alert("Failed to save polygon: " + res.info);
-                                }
+                                    showPopup("Polygon saved successfully!", "success");
+                                    setRecordingRedzone(false);
+                                } else showPopup("Failed to save polygon: " + res.info, "error");
                             })
                         }}
                     />
@@ -257,7 +262,7 @@ const CameraViewer = () => {
                         text="No"
                         className="w-full"
                         onClick={() => {
-                            setAskSavePolygon(false)
+                            setAskSaveRedzone(false)
                             setPolygonPoints([]);
                         }}
                     />
@@ -281,7 +286,7 @@ const CameraViewer = () => {
                     isLoading={loadingShare}
                     onClick={() => {
                         if (!shareEmail) {
-                            alert("Please enter a valid email address.");
+                            showPopup("Please enter a valid email address.", "error");
                             return;
                         }
                         setLoadingShare(true);
@@ -289,16 +294,14 @@ const CameraViewer = () => {
                             .then((res: any) => {
                                 setLoadingShare(false);
                                 if (res.success) {
-                                    alert("Camera shared successfully!");
+                                    showPopup("Camera shared successfully!", "success");
                                     setShowShare(false);
-                                } else {
-                                    alert("Failed to share camera: " + res.info);
-                                }
+                                } else showPopup("Failed to share camera: " + res.info, "error");
                             })
                             .catch((err: any) => {
                                 setLoadingShare(false);
                                 console.error("Error sharing camera:", err);
-                                alert("An error occurred while sharing the camera. Please try again later.");
+                                showPopup("An error occurred while sharing the camera. Please try again later.", "error");
                             });
                     }}
                 />
@@ -329,12 +332,12 @@ const CameraViewer = () => {
                 <div className="w-full px-2 flex flex-row gap-2">
                     {/* <Button text="Share" className="w-1/2" icon={FaShareAlt} onClick={() => setShowShare(true)} /> */}
                     <Button text="Share" className="w-full" icon={FaShareAlt} onClick={() => setShowShare(true)} />
-                    {recordingPolygon ? <Button text="Stop Polygon" className="w-full" icon={TbPolygonOff} onClick={() => {
-                        setRecordingPolygon(false)
-                        setAskSavePolygon(true);
-                    }} /> : <Button text="Record Polygon" className="w-full" icon={PiPolygonBold} onClick={() => {
+                    {recordingPolygon ? <Button text="Stop Recording" className="w-full" secondary icon={TbPolygonOff} onClick={() => {
+                        setRecordingRedzone(false)
+                        setAskSaveRedzone(true);
+                    }} /> : <Button text="Record Redzone" className="w-full" icon={PiPolygonBold} onClick={() => {
                         setPolygonPoints([]);
-                        setRecordingPolygon(true)
+                        setRecordingRedzone(true)
                     }} />}
                 </div>
             </div>

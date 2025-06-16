@@ -14,6 +14,7 @@ import json
 import base64
 import hashlib
 from PIL import Image
+import qrcode
 
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
 # TODO: MULTIPLE USERS NEED TO WORK MEANING IN SERVER_CAMERA IT NEEDS TO HAVE A LIST OF STREAMING CAMERAS
@@ -308,7 +309,9 @@ class ClientHandler:
         polygon = jdata["polygon"]
         if not isinstance(polygon, list) or len(polygon) < 3:
             self.camera_server.db.set_red_zone(mac, "[]")
+            self.camera_server.connected_cameras[mac].red_zone = []
             if mac in self.camera_server.last_redzones: del self.camera_server.last_redzones[mac]
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Polygon cleared", jdata))
             return
 
         self.camera_server.db.set_red_zone(mac, json.dumps(polygon))
@@ -476,11 +479,20 @@ class ClientHandler:
         local_ip_base64 = base64.b64encode(local_ip_bytes).decode('utf-8')
         
         local_ip_base64 = local_ip_base64.replace('=', '').replace('+', '-').replace('/', '_')
-        return local_ip_base64
+
+        qr = qrcode.QRCode()
+        qr.add_data(local_ip_base64)
+        f = io.StringIO()
+        qr.print_ascii(out=f)
+        f.seek(0)
+        qr = f.read()
+
+        return local_ip_base64, qr
 
     async def start_server(self):
-        server_code = self.__generate_server_code()
+        server_code, server_code_qr = self.__generate_server_code()
         self.logger.info(f"Server code: {server_code}")
+        print(server_code_qr)
         self.running = True
 
         # ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

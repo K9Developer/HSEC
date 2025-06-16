@@ -1,5 +1,6 @@
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { messaging } from "./firebase";
+import showPopup from "./utils/Popupmanager";
 
 
 export const macToId = (mac: string) => {
@@ -9,7 +10,7 @@ export const macToId = (mac: string) => {
 export const getFCMToken = async () => {
     const permission = await Notification.requestPermission();
     if (permission !== "granted") {
-        alert("Please allow notifications to receive updates.");
+        showPopup("Notification permission not granted. Please enable notifications in your settings.", "error");
         return null;
     }
 

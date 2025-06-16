@@ -356,6 +356,7 @@ class CameraServer:
             
             image = Image.open(io.BytesIO(frame))
             polygon = camera.red_zone
+            if polygon is None or len(polygon) < 3: continue
             red_zone_cut = cut_polygon_from_image(image, polygon)
 
             triggered = False

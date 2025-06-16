@@ -4,7 +4,6 @@ import HomePage from "./pages/HomePage.tsx";
 import AccountPage from "./pages/AccountPage.tsx";
 import CameraViewer from "./pages/CameraViewer.tsx";
 import DiscoveryPage from "./pages/DiscoveryPage.tsx";
-import ConnectToServerPage from "./pages/ConnectToServerPage.tsx";
 import UserContext from "./contexts/UserContext.tsx";
 import type { User } from "./types.tsx";
 import { UserManager } from "./utils/AccountManager.ts";
@@ -15,6 +14,12 @@ import Modal from "./components/Modal.tsx";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
 import NotificationPage from "./pages/NotificationPage.tsx";
 import { getFCMToken } from "./utils.ts";
+import { ToastContainer } from 'react-toastify';
+import showPopup from "./utils/Popupmanager.ts";
+import { CgQr } from "react-icons/cg";
+import { IconContext } from "react-icons";
+import { MdOutlinePowerInput } from "react-icons/md";
+import AnimatedQRScanner from "./components/AnimatedQRScanner.tsx";
 
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
@@ -22,6 +27,7 @@ const App = () => {
     const [currServerCode, setCurrServerCode] = useState("");
     const [connectingToServer, setConnectingToServer] = useState(false);
     const [connected, setConnected] = useState(false);
+    const [qrMode, setQrMode] = useState(false);
 
     const handleFCMToken = async () => {
         console.log("Requesting notification permission...");
@@ -51,7 +57,7 @@ const App = () => {
             if (localUser.session_token && localUser.email && !localUser.logged_in) {
                 const { success, reason } = await DataManager.sessionLogin(localUser.email, localUser.session_token);
                 if (!success) {
-                    alert(reason);
+                    showPopup(reason, "error");
                     UserManager.logoutUser();
                     console.error("Failed to log in with session token:", reason);
                 } else {
@@ -72,8 +78,14 @@ const App = () => {
         })
 
         DataManager.addEventListener("red_zone_trigger", () => {
-            alert("Red zone triggered! Please check the camera feed for more details.");
+            showPopup("Red zone triggered!", "warning", {
+                onClick: () => {
+                    if (window.location.pathname !== "/notifications") window.location.href = "/notifications";
+                    else window.location.reload();
+                }
+            });
         });
+
     }, []);
 
     useEffect(() => {
@@ -100,7 +112,7 @@ const App = () => {
             return true;
         } catch (err) {
             console.error("Failed to connect to server:", err);
-            alert("Failed to connect to server. Please check the server code and try again.");
+            showPopup("Failed to connect to server. Please check the server code and try again.", "error");
             setConnectingToServer(false);
             localStorage.removeItem("server_code");
             setCurrServerCode("");
@@ -113,20 +125,13 @@ const App = () => {
             const code = localStorage.getItem("server_code");
             if (code) {
                 const succ = await connect(code);
-                if (!succ) {
-                    setShowServerCode(true);
-                    console.log(1111111111111111, window.location.href)
-                    // if (window.location.pathname !== "/") window.location.href = "/";
-                }
+                if (!succ) setShowServerCode(true);
             }
 
             if (connected && !user) {
                 setShowServerCode(false);
                 handleAutoLogin();
-            } else {
-                setShowServerCode(true);
-                // if (window.location.pathname !== "/") window.location.href = "/";
-            }
+            } else setShowServerCode(true);
         }
 
         func();
@@ -141,44 +146,68 @@ const App = () => {
                 showCloseButton={false}
             >
                 <p className="text-foreground text-sm">Connect to server</p>
-                <Input
-                    placeholder="Server Code"
-                    onChange={(val: string) => {
-                        setCurrServerCode(val);
-                        return true;
-                    }}
-                    pattern={/.+/}
-                    startingValue={""}
-                />
-                <Button
-                    text="Connect"
-                    className="mt-8 w-full"
-                    isLoading={connectingToServer}
-                    disabled={currServerCode.length < 6}
-                    onClick={() => {
-                        setConnectingToServer(true);
-                        DataManager.connectToServer(currServerCode, 5000)
-                            .then(async () => {
-                                setShowServerCode(false);
-                                setCurrServerCode("");
-                                setConnectingToServer(false);
-                                localStorage.setItem("server_code", currServerCode);
-                                if (window.location.pathname !== "/") window.location.href = "/";
-                            }).catch((err) => {
-                                console.error("Failed to connect to server:", err);
-                                alert("Failed to connect to server. Please check the server code and try again.");
-                                setConnectingToServer(false);
-                                localStorage.removeItem("server_code");
-                            })
-                    }}
-                />
+                {
+                    qrMode ?
+                        <div className="w-50 h-50 rounded-2xl overflow-hidden mt-2">
+                            <AnimatedQRScanner onResult={(result) => {
+                                console.log("QR Code Result:", result);
+                                if (result.length < 6) {
+                                    showPopup("Invalid server code scanned. Please try again.", "error");
+                                    return;
+                                }
+                                setCurrServerCode(result);
+                                return true;
+                            }} freezeOnScan/>
+                        </div>
+                        : <Input
+                            placeholder="Server Code"
+                            onChange={(val: string) => {
+                                setCurrServerCode(val);
+                                return true;
+                            }}
+                            pattern={/.+/}
+                            startingValue={""}
+                        />
+                }
+                <div className="flex flex-row gap-3 mt-8 items-center">
+                    <Button
+                        text="Connect"
+                        className="w-full h-10"
+                        isLoading={connectingToServer}
+                        disabled={currServerCode.length < 6}
+                        onClick={() => {
+                            setConnectingToServer(true);
+                            DataManager.connectToServer(currServerCode, 5000)
+                                .then(async () => {
+                                    setShowServerCode(false);
+                                    setCurrServerCode("");
+                                    setConnectingToServer(false);
+                                    localStorage.setItem("server_code", currServerCode);
+                                    if (window.location.pathname !== "/") window.location.href = "/";
+                                }).catch((err) => {
+                                    console.error("Failed to connect to server:", err);
+                                    showPopup("Failed to connect to server. Please check the server code and try again.", "error");
+                                    setConnectingToServer(false);
+                                    localStorage.removeItem("server_code");
+                                })
+                        }}
+                    />
+                    <IconContext.Provider value={{ className: "text-foreground h-full w-10" }}>
+                        {
+                            qrMode ?
+                                <MdOutlinePowerInput onClick={() => setQrMode(false)} />
+                                :
+                                <CgQr onClick={() => setQrMode(true)} />
+
+                        }
+                    </IconContext.Provider>
+                </div>
             </Modal>
 
             <UserContext.Provider value={{ user, setUser }}>
                 <BrowserRouter>
                     <Routes>
                         <Route index element={<HomePage />} />
-                        <Route path="connect" element={<ConnectToServerPage />} />
                         <Route path="account" element={<AccountPage />} />
                         <Route path="notifications" element={<NotificationPage />} />
                         <Route path="discover" element={<DiscoveryPage />} />
@@ -188,6 +217,8 @@ const App = () => {
                     </Routes>
                 </BrowserRouter>
             </UserContext.Provider>
+
+            <ToastContainer />
         </>
     );
 };

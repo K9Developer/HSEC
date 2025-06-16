@@ -8,18 +8,13 @@ import Modal from "../components/Modal";
 import Input from "../components/Input";
 import Button from "../components/Button";
 import { useNavigate } from "react-router-dom";
+import showPopup from "../utils/Popupmanager";
 
 interface CameraDiscoveredType {
     ip: string;
     mac: string;
     port: number;
 }
-
-// const TMP_CAMERA_DATA = [
-//     { ip: "10.10.10.1", mac: "00:00:00:00:00:01" },
-//     { ip: "10.10.10.2", mac: "00:00:00:00:00:02" },
-//     { ip: "10.10.10.3", mac: "00:00:00:00:00:03" },
-// ];
 
 interface CameraConnectModal {
     camera: CameraDiscoveredType | null;
@@ -36,12 +31,6 @@ const DiscoveryPage = () => {
     });
     const [expectingCameraPair, setExpectingCameraPair] = React.useState(false);
     const navigate = useNavigate();
-    
-    const cameraPairTimeout = () => {
-        setExpectingCameraPair(false);
-        setCameraConnectModal({ camera: null, show: false });
-        alert("Camera Pairing Timed Out");
-    };
 
     const onCameraPairSuccess = (data: any) => {
         console.log("Camera Pair Success", data);
@@ -56,8 +45,7 @@ const DiscoveryPage = () => {
         clearTimeout(connectTimeout!);
         setExpectingCameraPair(false);
         setCameraConnectModal({ camera: null, show: false });
-        console.log(data)
-        alert("Camera Pairing Failed: " + data.info);
+        showPopup("Failed to pair camera: " + data.info, "error");
         // Handle camera pairing failure
     };
 
@@ -109,7 +97,6 @@ const DiscoveryPage = () => {
                     onClick={() => {
                         if (!cameraConnectModal.camera) return;
                         console.log("Attempting to connect to camera", cameraConnectModal.camera.ip, currCameraCode);
-                        connectTimeout = setTimeout(cameraPairTimeout, 4000);
                         attemptCameraConnect(cameraConnectModal.camera, currCameraCode);
                     }}
                 />

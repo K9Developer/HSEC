@@ -2,6 +2,7 @@
 // Include caching and GetCameras will take a bool whether to override the cache
 
 import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse } from "../types";
+import showPopup from "./Popupmanager";
 
 export type DataEvent = "frame" | "camera_discovered" | "red_zone_trigger"
 export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token";
@@ -12,7 +13,7 @@ let websocketServer: WebSocket | null = null;
 
 const base64ToIP = (b64: string) => {
     const binaryStr = atob(b64);
-    if (binaryStr.length !== 4) alert("BAD CODE")
+    if (binaryStr.length !== 4) showPopup("Invalid server code length, must be 4 bytes", "error");
     const bytes = Array.from(binaryStr, char => char.charCodeAt(0));
 
     return bytes.join('.');
@@ -282,7 +283,7 @@ export class DataManager {
         })
     }
 
-    static async savePolygon(mac: string, polygon: [number, number][]): Promise<GenericResponse> {
+    static async saveRedzone(mac: string, polygon: [number, number][]): Promise<GenericResponse> {
         return new Promise((resolve, _) => {
             if (!DataManager.isConnected()) {
                 resolve({ success: false, info: "Not connected to server" });

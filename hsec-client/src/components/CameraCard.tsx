@@ -9,6 +9,7 @@ import Button from "./Button";
 import { DataManager } from "../utils/DataManager";
 import { VscDebugDisconnect } from "react-icons/vsc";
 import { AiOutlineDisconnect } from "react-icons/ai";
+import showPopup from "../utils/Popupmanager";
 
 interface Props {
     camera: Camera;
@@ -23,17 +24,16 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
     const [loadingUnpair, setLoadingUnpair] = React.useState(false);
 
     const renameCamera = async (name: string) => {
-        // Simulate renaming camera
         DataManager.renameCamera(camera.mac, name).then((res) => {
             if (res.success) {
                 setShowRenameModal(false);
                 updateCameraList()
             } else {
-                alert("Failed to rename camera: " + res.info);
+                showPopup("Failed to rename camera: " + res.info, "error");
             }
         }).catch((err) => {
             console.error("Error renaming camera:", err);
-            alert("An error occurred while renaming the camera.");
+            showPopup("An error occurred while renaming the camera.", "error");
         })
     };
 
@@ -63,7 +63,7 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
                     onClick={() => {
                         if (currCameraName === camera.name) return;
                         if (currCameraName === "") {
-                            alert("Camera name cannot be empty");
+                            showPopup("Camera name cannot be empty", "error");
                             return;
                         }
                         renameCamera(currCameraName);
@@ -91,30 +91,16 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
                                 updateCameraList();
                                 setLoadingUnpair(false);
                             } else {
-                                alert("Failed to unpair camera: " + res.info);
+                                showPopup("Failed to unpair camera: " + res.info, "error");
                                 setLoadingUnpair(false);
                             }
                         }).catch((err) => {
                             console.error("Error unpairing camera:", err);
-                            alert("An error occurred while unpairing the camera.");
+                            showPopup("An error occurred while unpairing the camera.", "error");
                             setLoadingUnpair(false);
                         });
                     }}
                 />
-
-                {/* <Button
-                    text="Rename"
-                    className="mt-8 w-full"
-                    disabled={currCameraName === camera.name || currCameraName === ""}
-                    onClick={() => {
-                        if (currCameraName === camera.name) return;
-                        if (currCameraName === "") {
-                            alert("Camera name cannot be empty");
-                            return;
-                        }
-                        renameCamera(currCameraName);
-                    }}
-                /> */}
             </Modal>
 
             <div className="flex flex-row justify-between items-center px-4 py-2">

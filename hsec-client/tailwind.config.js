@@ -48,6 +48,7 @@ export default {
                 purple: "#20193A",
                 darkpurple: "#17112B",
                 lightblue: "#00B8FF",
+                darkblue: "#05729c",
             },
         },
     },
