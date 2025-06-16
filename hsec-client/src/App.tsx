@@ -20,6 +20,7 @@ import { CgQr } from "react-icons/cg";
 import { IconContext } from "react-icons";
 import { MdOutlinePowerInput } from "react-icons/md";
 import AnimatedQRScanner from "./components/AnimatedQRScanner.tsx";
+import { Scanner } from '@yudiel/react-qr-scanner'; // gotta have this import for the qr to work even tho thats not used directly (FOR SOME FUCKIN REASON)
 
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
