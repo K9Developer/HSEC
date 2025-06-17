@@ -73,7 +73,7 @@ const CameraCard = ({ camera, onClick, updateCameraList }: Props) => {
             <Modal
                 visible={showUnpairModal}
                 onClose={() => {
-                    setShowRenameModal(false);
+                    setShowUnpairModal(false);
                 }}
             >
                 <p className="text-foreground text-sm">Unpair Camera, Are you sure?</p>

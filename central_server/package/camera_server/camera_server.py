@@ -258,7 +258,6 @@ class CameraServer:
             return False
         
         camera_ip = camera.client.addr[0]
-
         self.camera_discover_server.server_socket.sendto(
             constants.Options.MESSAGE_SEPARATOR.join(Messages.CAMERA_UNPAIR_REQUEST),
             (camera_ip, Constants.CAMERA_HEARTBEAT_LISTENER_PORT)

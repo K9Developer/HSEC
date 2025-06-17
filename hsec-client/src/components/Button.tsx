@@ -18,7 +18,7 @@ const Button = ({ text, onClick, isLoading, disabled, className, secondary=false
             className={
                 "font-semibold py-2 rounded-lg h-10 flex justify-center px-2 " +
                 (disabled ? "bg-inherit border-lightpurple border-[1px] text-lightpurple " : "bg-lightblue ") +
-                (secondary ? "text-foreground bg-darkblue " : "") +
+                (secondary ? "!text-foreground !bg-darkblue " : "") +
                 className
             }
         >

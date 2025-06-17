@@ -18,7 +18,7 @@ import { ToastContainer } from 'react-toastify';
 import showPopup from "./utils/Popupmanager.ts";
 import { CgQr } from "react-icons/cg";
 import { IconContext } from "react-icons";
-import { MdOutlinePowerInput } from "react-icons/md";
+import { MdKeyboardAlt } from "react-icons/md";
 import AnimatedQRScanner from "./components/AnimatedQRScanner.tsx";
 import { Scanner } from '@yudiel/react-qr-scanner'; // gotta have this import for the qr to work even tho thats not used directly (FOR SOME FUCKIN REASON)
 
@@ -196,7 +196,7 @@ const App = () => {
                     <IconContext.Provider value={{ className: "text-foreground h-full w-10" }}>
                         {
                             qrMode ?
-                                <MdOutlinePowerInput onClick={() => setQrMode(false)} />
+                                <MdKeyboardAlt onClick={() => setQrMode(false)} />
                                 :
                                 <CgQr onClick={() => setQrMode(true)} />
 
