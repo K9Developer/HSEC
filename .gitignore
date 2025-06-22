@@ -8,3 +8,4 @@ node_modules/
 serviceAccountKey.json
 certs/
 log.txt
+*.pt

@@ -57,10 +57,9 @@ def send_camera_share_email(sharer, recipient_email, mac, logger):
         return False
 
 
-MOTION_ALERT_PLAINTEXT_BODY = """HSEC Motion Alert\nMotion was detected by your camera.\nCamera MAC: {CAMERA_MAC}\nCheck your HSEC dashboard to view recent activity.\n\n© 2025 HSEC"""
-MOTION_ALERT_HTML_BODY = """<!doctypehtml><meta charset=UTF-8><title>Motion Detected</title><body style=margin:0;padding:0;font-family:Arial,sans-serif;background-color:#f2f4f6><table width=100% cellpadding=0 cellspacing=0><tr><td style="padding:40px 0"align=center><table width=600 style="background-color:#fff;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.05)"><tr><td style=background-color:#d92e2e;padding:24px align=center><img src=https://i.ibb.co/27CzBM1X/hsec.png alt="HSEC Logo"width=120><tr><td style=padding:40px;color:#333;font-size:16px><p style=margin-top:0>Hi there,<p><strong>Motion was detected</strong> in a protected area by your camera.<p>Camera MAC address:<div style="margin:30px 0;text-align:center"><div style="display:inline-block;padding:16px 32px;font-size:24px;font-weight:700;color:#d92e2e;background:#fce8e6;border-radius:8px;letter-spacing:1px">{CAMERA_MAC}</div></div><p>Below is a snapshot of the moment motion was detected:<div style=text-align:center;margin-top:20px><img src=cid:motion_image style=max-width:100%;border-radius:8px></div><p style=margin-top:30px>Visit your dashboard to view live footage or more alerts.<p style=margin-top:40px;font-size:12px;color:#888>© 2025 HSEC. All rights reserved.</table></table>"""
-
-def send_motion_alert_email(email: str | list[str], mac: str, frame: bytes, logger):
+MOTION_ALERT_PLAINTEXT_BODY = """HSEC Motion Alert\n\nMotion was detected by your camera.\n\nCamera MAC: {CAMERA_MAC}\nDetected Objects: {CLASSES}\n\nCheck your HSEC dashboard to view recent activity.\n\n© 2025 HSEC"""
+MOTION_ALERT_HTML_BODY = """<!doctypehtml><meta charset=UTF-8><title>Motion Detected</title><body style=margin:0;padding:0;font-family:Arial,sans-serif;background-color:#f2f4f6><table width=100% cellpadding=0 cellspacing=0><tr><td style="padding:40px 0"align=center><table width=600 style="background-color:#fff;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.05)"><tr><td style=background-color:#d92e2e;padding:24px align=center><img src=https://i.ibb.co/27CzBM1X/hsec.png alt="HSEC Logo"width=120><tr><td style=padding:40px;color:#333;font-size:16px><p style=margin-top:0>Hi there,<p><strong>Motion was detected</strong> in a protected area by your camera.<p>Camera MAC address:<div style="margin:30px 0;text-align:center"><div style="display:inline-block;padding:16px 32px;font-size:24px;font-weight:700;color:#d92e2e;background:#fce8e6;border-radius:8px;letter-spacing:1px">{CAMERA_MAC}</div></div><p><strong>Detected objects:</strong> {CLASSES}<p>Below is a snapshot of the moment motion was detected:<div style=text-align:center;margin-top:20px><img src=cid:motion_image style=max-width:100%;border-radius:8px></div><p style=margin-top:30px>Visit your dashboard to view live footage or more alerts.<p style=margin-top:40px;font-size:12px;color:#888>© 2025 HSEC. All rights reserved.</table></table>"""
+def send_motion_alert_email(email: str | list[str], classes: list[str], mac: str, frame: bytes, logger):
     try:
         if isinstance(email, str):
             recipients = [email]
@@ -73,8 +72,8 @@ def send_motion_alert_email(email: str | list[str], mac: str, frame: bytes, logg
         msg["To"] = ", ".join(recipients)
 
         alt_part = MIMEMultipart("alternative")
-        plain = MOTION_ALERT_PLAINTEXT_BODY.replace("{CAMERA_MAC}", mac)
-        html = MOTION_ALERT_HTML_BODY.replace("{CAMERA_MAC}", mac)
+        plain = MOTION_ALERT_PLAINTEXT_BODY.replace("{CAMERA_MAC}", mac).replace("{CLASSES}", ", ".join(classes))
+        html = MOTION_ALERT_HTML_BODY.replace("{CAMERA_MAC}", mac).replace("{CLASSES}", ", ".join(classes))
 
         alt_part.attach(MIMEText(plain, "plain"))
         alt_part.attach(MIMEText(html, "html"))

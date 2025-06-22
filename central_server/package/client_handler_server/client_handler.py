@@ -5,6 +5,7 @@ import time
 import numpy as np
 import websockets
 from websockets.asyncio.server import serve
+from package.camera_server.constants import CATEGORY_TO_CLASS
 from package.client_handler_server.push_notification_manager import send_notification
 from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email, send_motion_alert_email
 from package.camera_server.camera_server import CameraServer
@@ -58,6 +59,7 @@ class ClientHandler:
             "rename_camera": self.__rename_camera,
             "unpair_camera": self.__unpair_camera,
             "pair_camera": self.__pair_camera,
+            "update_alert_categories": self.__update_alert_categories,
 
             "login_session": self.__handle_session_login,
             "login_pass": self.__handle_password_login,
@@ -173,19 +175,17 @@ class ClientHandler:
                     frame = self.__manage_jumpscare(frame, self.__get_email_from_websocket(websocket))
                 await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "frame": base64.b64encode(frame).decode(), "type": "frame"}, jdata))
 
-    async def __on_red_zone_trigger(self, mac, frame):
+    async def __on_red_zone_trigger(self, mac, frame, detections):
         if mac in self.camera_alert_times and time.time()-self.camera_alert_times[mac] < RED_ZONE_ALERT_COOLDOWN:
             return
 
         self.camera_alert_times[mac] = time.time()
         users_linked = self.db.get_users_using_camera(mac)
 
-        img = Image.open(io.BytesIO(frame)).convert("RGB")   # force JPEG-safe mode
-        img.thumbnail((100, 100), Image.LANCZOS)             # keep aspect ratio, high-quality downscale
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85, optimize=True)  # tweak quality if you want
-        b64_small_frame = buf.getvalue()  
+        b64_small_frame = base64.b64encode(cv2.imencode('.jpg', cv2.resize(frame, (100, 100), interpolation=cv2.INTER_AREA), [int(cv2.IMWRITE_JPEG_QUALITY), 35])[1]).decode()
 
+        classes = [d["class"] for d in detections]
+        self.logger.info(f"Red zone triggered for camera {mac}, detected classes: {', '.join(classes)}")
         for email in users_linked:
             websocket = self.connected_sessions.get(email[0])
             if websocket:
@@ -194,10 +194,10 @@ class ClientHandler:
             self.db.add_notification(email[0], {
                 "type": "red_zone_trigger",
                 "title": "Red Zone Triggered",
-                "message": f"Red zone triggered for camera {mac}.",
+                "message": f"Red zone triggered for camera {mac}. Detected classes: {', '.join(classes)}.",
                 "mac": mac,
                 "timestamp": int(time.time()),
-                "frame": base64.b64encode(frame).decode()
+                "frame": base64.b64encode(cv2.imencode('.jpg', frame)[1]).decode()
             })            
 
             fcm_token = self.db.get_fcm_token(email[0])
@@ -210,12 +210,12 @@ class ClientHandler:
                     data={
                         "type": "red_zone_trigger",
                         "mac": mac,
-                        "frame": "data:image/png;base64," + base64.b64encode(b64_small_frame).decode(),
+                        "frame": "data:image/png;base64," + b64_small_frame,
                         "url": "/notifications"
                     }
                 )
         
-        send_motion_alert_email([e[0] for e in users_linked], mac, frame, self.logger)
+        send_motion_alert_email([e[0] for e in users_linked], classes, mac, cv2.imencode('.jpg', frame)[1], self.logger)
 
         
     async def __on_camera_discovered(self, addr, mac):
@@ -246,6 +246,22 @@ class ClientHandler:
         jdata["email"] = email
         self.streaming_transactions["paired_cameras"].append((websocket, jdata))
 
+    async def __update_alert_categories(self, websocket, jdata, email):
+        mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
+        
+        categories = jdata["categories"]
+        if not isinstance(categories, list) or len(categories) == 0:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Invalid categories", jdata))
+            return
+        
+        self.camera_server.db.set_alert_categories(mac, json.dumps(categories))
+        self.camera_server.connected_cameras[mac].alert_categories = categories
+        self.logger.info(f"Updated alert categories for camera {mac}: {categories}")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Alert categories updated", jdata))
+
     async def __discover_cameras(self, websocket, jdata, _):
         if jdata["transaction_id"] in [t[1]["transaction_id"] for t in self.streaming_transactions["discover_cameras"]]:
             await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Discovery already in progress", jdata))
@@ -266,8 +282,11 @@ class ClientHandler:
         cameras = self.camera_server.db.get_all_cameras()
         linked_cameras = self.db.get_linked_cameras(email)
         connected_cameras = self.camera_server.connected_cameras
-        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else b"").decode(), "ip": cam.last_known_ip, "connected": cam.mac in connected_cameras, "red_zone": cam.red_zone} for cam in cameras if cam.mac in linked_cameras]
-        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, camera_list, jdata))
+        camera_list = [{"mac": cam.mac, "name": cam.name, "last_frame": base64.b64encode(cam.last_frame if cam.last_frame else b"").decode(), "ip": cam.last_known_ip, "connected": cam.mac in connected_cameras, "red_zone": cam.red_zone, "alert_categories": cam.alert_categories} for cam in cameras if cam.mac in linked_cameras]
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {
+            "cameras": camera_list,
+            "categories": list(CATEGORY_TO_CLASS.keys())
+        }, jdata))
     
     async def __stream_camera(self, websocket, jdata, email):
         mac = jdata["mac"]

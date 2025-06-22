@@ -4,7 +4,7 @@ import ast
 from package.socket_server_lib.client import SocketClient
 
 class Camera:
-    def __init__(self, mac, name, last_frame, key, red_zone, last_known_ip):
+    def __init__(self, mac, name, last_frame, key, red_zone, last_known_ip, alert_categories):
         self.mac = mac
         self.name = name
         self.last_frame = last_frame
@@ -12,6 +12,7 @@ class Camera:
         self.red_zone = red_zone if red_zone is None or isinstance(red_zone, list) else ast.literal_eval(red_zone)
         self.last_known_ip = last_known_ip
         self.client: SocketClient | None = None
+        self.alert_categories = [] if alert_categories is None else (alert_categories if isinstance(alert_categories, list) else ast.literal_eval(alert_categories))
 
     def __repr__(self):
         return f"Camera(mac={self.mac}, name={self.name}, last_frame={self.last_frame}, key={self.key})"
@@ -37,7 +38,8 @@ class CameraDatabase:
                 last_frame TEXT,
                 key TEXT,
                 red_zone TEXT,
-                last_known_ip TEXT
+                last_known_ip TEXT,
+                alert_categories TEXT DEFAULT '[]'
             )
         ''')
         conn.commit()
@@ -58,11 +60,11 @@ class CameraDatabase:
 
         conn, cursor = self._get_conn()
         cursor.execute('''
-            INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone, last_known_ip)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (mac, name, None, key, None, last_known_ip))
+            INSERT OR REPLACE INTO cameras (mac, name, last_frame, key, red_zone, last_known_ip, alert_categories)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (mac, name, None, key, None, last_known_ip, '[]'))
         conn.commit()
-        return Camera(mac, name, None, key, None, last_known_ip)
+        return Camera(mac, name, None, key, None, last_known_ip, [])
 
     def get_camera(self, mac):
         _, cursor = self._get_conn()
@@ -94,6 +96,11 @@ class CameraDatabase:
     def set_red_zone(self, mac, red_zone):
         conn, cursor = self._get_conn()
         cursor.execute('UPDATE cameras SET red_zone = ? WHERE mac = ?', (red_zone, mac))
+        conn.commit()
+
+    def set_alert_categories(self, mac, alert_categories):
+        conn, cursor = self._get_conn()
+        cursor.execute('UPDATE cameras SET alert_categories = ? WHERE mac = ?', (alert_categories, mac))
         conn.commit()
 
     def close(self):

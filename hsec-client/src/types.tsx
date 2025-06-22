@@ -5,6 +5,7 @@ export interface Camera {
     mac: string;
     connected?: boolean;
     red_zone?: [number, number][];
+    alert_categories?: string[];
 }
 
 export interface User {
@@ -37,6 +38,7 @@ export interface GenericResponse {
 
 export interface GetCamerasResponse extends GenericResponse {
     cameras: Camera[];
+    categories: string[];
 }
 
 export interface GetNotificationsResponse extends GenericResponse {

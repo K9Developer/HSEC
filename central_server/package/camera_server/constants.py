@@ -1,5 +1,11 @@
 from ..socket_server_lib.constants import Options
 
+CATEGORY_TO_CLASS = {
+    "People": ["person"],
+    "Vehicles": ["bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat"],
+    "Animals": ["bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"],
+}
+
 class Constants:
     CAMERA_HEARTBEAT_LISTENER_PORT = 5000
     CAMERA_HANDLER_PORT = 5001
@@ -9,9 +15,8 @@ class Constants:
 
     STATIC_CAMERA_FRAME_UPDATE_INTERVAL = 30
     
-    RED_ZONE_SIMILARITY_THRESHOLD = 100
+    RED_ZONE_DETECTION_THRESHOLD = 50
     FRAMES_BETWEEN_RED_ZONE_CHECKS = 20
-    FRAMES_BETWEEN_COMPARISONS = 10
 
 class Messages:
     CAMERA_PAIRING_QUERY = [b"CAMPAIR-HSEC", Options.ANY_VALUE_TEMPLATE]

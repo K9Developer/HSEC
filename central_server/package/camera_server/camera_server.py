@@ -1,40 +1,47 @@
-import io
 import time
 
-from package.camera_server.movment_detection import motion_score
+import cv2
+import numpy as np
+
+from package.camera_server.movement_detection import MovementDetector
 
 from ..socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
-from package.camera_server.constants import Constants, Messages
+from package.camera_server.constants import CATEGORY_TO_CLASS, Constants, Messages
 import socket
 from package.camera_server.database_manager import CameraDatabase, Camera
 import threading
 from Cryptodome.Util.Padding import pad, unpad
 from Cryptodome.Cipher import AES
-import time
-from PIL import Image, ImageDraw, ImageFilter
-import imagehash
 from queue import Queue
 
-def perceptual_hash(image: Image.Image) -> int:
-    return int(str(imagehash.phash(image)), 16)
+def filter_detections(detections, red_zone, alert_categories):
+    red_poly = np.array(red_zone, dtype=np.int32)
 
-def distance_between_hashes(hash1: int, hash2: int) -> int:
-    return bin(hash1 ^ hash2).count('1')
+    allowed_classes = [
+        cls
+        for cat in alert_categories
+        for cls in CATEGORY_TO_CLASS[cat]
+    ]
 
-def cut_polygon_from_image(image: Image.Image, polygon: list[list[int]]) -> Image.Image:
-    polygon = [tuple(pt) for pt in polygon]
-    mask = Image.new("L", image.size, 0)
-    ImageDraw.Draw(mask).polygon(polygon, fill=255)
-    red_zone = Image.new("RGB", image.size)
-    red_zone.paste(image, mask=mask)
-    xs, ys = zip(*polygon)
-    bbox = (min(xs), min(ys), max(xs), max(ys))
-    return red_zone.crop(bbox)
+    filtered = []
+    for det in detections:
+        if det["class"] not in allowed_classes: continue
+
+        x1, y1, x2, y2 = det["coordinates"]
+        det_poly = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+
+        intersection_area, _ = cv2.intersectConvexConvex(red_poly, det_poly)
+        if intersection_area > 0:
+            filtered.append(det)
+
+    return filtered
+    
 
 class CameraServer:
     def __init__(self, callbacks: dict, logger=DefaultLogger()):
         self.logger = logger
         self.connected_cameras: dict[str, Camera] = {}
+        self.movement_detector = MovementDetector(logger, threshold=Constants.RED_ZONE_DETECTION_THRESHOLD)
 
         # This server listens for camera pairing mode broadcasts
         self.camera_discover_server = SocketServer(
@@ -282,28 +289,23 @@ class CameraServer:
 
                 if camera.mac not in self.connected_cameras: continue
                 
-                image = Image.open(io.BytesIO(frame))
-                polygon = camera.red_zone
-                if polygon is None or len(polygon) < 3: continue
-                red_zone_cut = cut_polygon_from_image(image, polygon)
+                cv2_image = cv2.imdecode(np.frombuffer(frame, np.uint8), cv2.IMREAD_COLOR)
 
-                triggered = False
+                if camera.mac in self.last_redzones:
+                    frame, detections = self.movement_detector.detect_frame(cv2_image, draw_box=True)
 
-                if camera.mac in self.last_redzones and len(self.last_redzones[camera.mac][0]) >= Constants.FRAMES_BETWEEN_COMPARISONS:
-                    score = motion_score(self.last_redzones[camera.mac][0][0], red_zone_cut)
-                    if score >= Constants.RED_ZONE_SIMILARITY_THRESHOLD: triggered = True
+                    allowed_classes = []
+                    for category in camera.alert_categories:
+                        allowed_classes.extend(CATEGORY_TO_CLASS[category])
+
+                    filtered_detections = filter_detections(detections, camera.red_zone, camera.alert_categories)
+                    if len(filtered_detections) > 0:
+                        del self.last_redzones[camera.mac]
+                        self.callbacks["on_red_zone_trigger"](camera.mac, frame, filtered_detections)
                 elif camera.mac not in self.last_redzones:
-                    self.last_redzones[camera.mac] = [[], 0]
-                
-                if not triggered: self.last_redzones[camera.mac][0].append(red_zone_cut)
-                if len(self.last_redzones[camera.mac][0]) > Constants.FRAMES_BETWEEN_COMPARISONS:
-                    self.last_redzones[camera.mac][0].pop(0)
-
-                if triggered:
-                    del self.last_redzones[camera.mac]
-                    self.callbacks["on_red_zone_trigger"](camera.mac, frame)
+                    self.last_redzones[camera.mac] = 0
             except Exception as e:
-                pass
+                self.logger.error(f"Error processing frame queue: {e}")
 
     def __handle_frame(self, camera_cli, fields):
         frame = constants.Options.MESSAGE_SEPARATOR.join(fields[1:])
@@ -318,12 +320,13 @@ class CameraServer:
         
         check_red_zone = False
         if camera.mac in self.last_redzones: 
-            self.last_redzones[camera.mac][1] += 1
-            if self.last_redzones[camera.mac][1] >= Constants.FRAMES_BETWEEN_RED_ZONE_CHECKS:
-                self.last_redzones[camera.mac][1] = 0
+            self.last_redzones[camera.mac] += 1
+            if self.last_redzones[camera.mac] >= Constants.FRAMES_BETWEEN_RED_ZONE_CHECKS:
+                self.last_redzones[camera.mac] = 0
                 check_red_zone = True
         else:
             check_red_zone = True
+            self.last_redzones[camera.mac] = 0
 
         if camera.red_zone is not None and check_red_zone:
             self.frame_queue.put((camera, frame))

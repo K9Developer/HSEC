@@ -11,7 +11,8 @@ import Modal from "../components/Modal";
 import Input from "../components/Input";
 import { PiPolygonBold } from "react-icons/pi";
 import { TbPolygonOff } from "react-icons/tb";
-import showPopup from "../utils/Popupmanager";
+import showPopup from "../utils/PopupManager";
+import MultipleChoose from "../components/MultipleChoose";
 
 // Add modal with email
 
@@ -31,6 +32,8 @@ const CameraViewer = () => {
     const [imageWidth, setImageSize] = React.useState<number>(0);
     const [imageHeight, setImageHeight] = React.useState<number>(0);
     const [polygonPoints, setPolygonPoints] = React.useState<[number, number][]>([]);
+    const [categories, setCategories] = React.useState<string[]>([]);
+    const [selectedCategories, setSelectedCategories] = React.useState<string[]>([]);
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const presetPolygonPoints = useRef<boolean>(false);
@@ -182,6 +185,7 @@ const CameraViewer = () => {
                 return;
             }
             setCamera(cameraData);
+            setCategories(camerasData.categories);
             // setStreaming(true);
             let res = await DataManager.startStreamCamera(cameraData.mac);
             if (!res.success) {
@@ -320,13 +324,33 @@ const CameraViewer = () => {
                 </div>
             </div>
             <div className="flex flex-col justify-between h-full pb-4 px-2">
-                <div className="mt-2 p-2">
-                    <div className="rounded-xl bg-lightpurple w-full relative" style={{
+                <div className="mt-2 p-2 flex flex-col gap-2">
+                    <div className="rounded-xl bg-lightpurple w-full relative rounded-md overflow-hidden" style={{
                         aspectRatio: imageWidth / imageHeight,
                     }}>
                         <img src={currentSourceUrl} alt="Camera Feed" className="w-full h-full" />
                         <canvas className="w-full absolute top-0 left-0 h-full rounded-md bg-transparent" id="cameraCanvas" ref={canvasRef} onClick={handleCanvasClick} />
 
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-purple shadow-lg flex flex-col gap-4">
+                        <p className="text-lighterpurple text-lg font-bold">Choose Alert Categories</p>
+                        <div className="max-h-48 relative overflow-y-auto">
+                            <MultipleChoose items={categories} onChange={(cats: string[]) => setSelectedCategories(cats)} startValues={camera.alert_categories ?? []} disabled={polygonPoints.length==0} />
+                        </div>
+                        <Button text="Apply" onClick={()=>{
+                            if (!camera) return;
+                                camera.alert_categories = selectedCategories;
+                                DataManager.updateAlertCategories(camera.mac, selectedCategories).then((res: any) => {
+                                    if (res.success) {
+                                        showPopup("Alert categories updated successfully!", "success");
+                                        setCamera({ ...camera });
+                                    } else showPopup("Failed to update alert categories: " + res.info, "error");
+                                }).catch((err: any) => {
+                                    console.error("Error updating alert categories:", err);
+                                    showPopup("An error occurred while updating alert categories. Please try again later.", "error");
+                                });
+                        }} disabled={polygonPoints.length==0}/>
                     </div>
                 </div>
                 <div className="w-full px-2 flex flex-row gap-2">

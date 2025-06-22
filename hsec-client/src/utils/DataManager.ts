@@ -5,7 +5,7 @@ import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse } fr
 import showPopup from "./PopupManager";
 
 export type DataEvent = "frame" | "camera_discovered" | "red_zone_trigger"
-export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token";
+export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token" | "update_alert_categories";
 
 const SERVER_PORT = 34531
 
@@ -133,6 +133,20 @@ export class DataManager {
         return transaction_id;
     }
 
+    static async updateAlertCategories(mac: string, categories: string[]): Promise<GenericResponse> {
+        return new Promise((resolve, _) => {
+            if (!DataManager.isConnected()) {
+                resolve({ success: false, info: "Not connected to server" });
+                return;
+            }
+
+            DataManager.sendRequest("update_alert_categories", { mac, categories }, (data) => {
+                if (data.error) resolve({ success: false, info: data.error });
+                else resolve({ success: data.status === "success", info: data.data || "" });
+            });
+        })
+    }
+
     // stream
     static async startDiscoverCameras(): Promise<GenericResponse> {
         console.log("Starting camera discovery...");
@@ -177,13 +191,13 @@ export class DataManager {
     static async getCameras(): Promise<GetCamerasResponse> {
         return new Promise((resolve, _) => {
             if (!DataManager.isConnected()) {
-                resolve({ success: false, cameras: [], info: "Not connected to server" });
+                resolve({ success: false, cameras: [], categories: [], info: "Not connected to server" });
                 return;
             }
 
             DataManager.sendRequest("get_cameras", {}, (data) => {
-                if (data.error) resolve({ success: false, cameras: [], info: data.error });
-                else resolve({ success: data.status === "success", cameras: data.data || [], info: "" });
+                if (data.error) resolve({ success: false, cameras: [], categories: [], info: data.error });
+                else resolve({ success: data.status === "success", cameras: data.data.cameras || [], categories: data.data.categories, info: "" });
             })
         })
     }
