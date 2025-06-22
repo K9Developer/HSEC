@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <tuple>
+#include <led_manager/led_manager.h>
 
 enum CameraState
 {
@@ -32,6 +33,7 @@ private:
 
     std::vector<uint8_t> curr_frame;
     CameraManager* camera = &CameraManager::getInstance();
+    LEDManager* led_manager = &LEDManager::getInstance();
 
     Task *heartbeat_send_task;
     Task *heartbeat_response_task;
@@ -325,6 +327,8 @@ public:
         auto success = camera->init();
         if (!success)
             _on_fatal_error("Failed to initialize camera!");
+
+        led_manager->init(PIN__RGB_LED);
     }
 
     void update_server_data()
@@ -464,15 +468,16 @@ public:
         if (current_state & DISCOVERING) {
             heartbeat_send_task->tick();
             heartbeat_response_task->tick();
+            led_manager->start_led({52, 100, 235, 100}, Effect::FADE_IN_OUT, 1000, 50, 1000);
         } else if (current_state & REPEAIRING) {
             repair_task->tick();
+            led_manager->start_led({201, 52, 235, 100}, Effect::FADE_IN_OUT, 1000, 50, 1000);
         } else if (current_state & LINKED) {
             stream_task->force_run();
             listen_task->tick();
+            led_manager->start_led({201, 41, 16, 20}, Effect::BLINK, 500, 1000, 500);
         }
 
-
-        // If clicked button, purge_server and put on discovering
     }
 };
 

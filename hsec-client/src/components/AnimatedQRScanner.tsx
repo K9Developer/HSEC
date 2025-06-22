@@ -167,21 +167,23 @@ const AnimatedQRScanner: React.FC<AnimatedQRScannerProps> = ({
             setAnimating(true);
           }
         },
-        { returnDetailedScanResult: true, highlightScanRegion: false, calculateScanRegion: (video: HTMLVideoElement) => {
-            return {
-              x: 0,
-              y: 0,
-              width: video.videoWidth,
-              height: video.videoHeight,
-              downscaledWidth: video.videoWidth,
-              downscaledHeight: video.videoHeight
-            };
-          } },
+        { 
+          returnDetailedScanResult: true,
+          highlightScanRegion: false,
+          calculateScanRegion: (video: HTMLVideoElement) => {return {x: 0, y: 0, width: video.videoWidth, height: video.videoHeight, downscaledWidth: video.videoWidth, downscaledHeight: video.videoHeight}},
+          preferredCamera: 'environment',
+        },
       );
+      
     }
     const scanner = scannerRef.current;
     if (animating || freeze) scanner.pause();
     else scanner.start();
+    setTimeout(() => {
+      scanner.stop();
+      scanner.setCamera('environment')
+      scanner.start();
+    },1000);
     return () => {
       scanner.stop();
       scanner.destroy();

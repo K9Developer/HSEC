@@ -2,7 +2,7 @@
 // Include caching and GetCameras will take a bool whether to override the cache
 
 import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse } from "../types";
-import showPopup from "./Popupmanager";
+import showPopup from "./PopupManager";
 
 export type DataEvent = "frame" | "camera_discovered" | "red_zone_trigger"
 export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token";

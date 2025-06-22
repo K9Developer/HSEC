@@ -1,7 +1,7 @@
-from collections import deque
 import io
-import math
 import time
+
+from package.camera_server.movment_detection import motion_score
 
 from ..socket_server_lib.socket_server import DefaultLogger, SocketServer, constants, SocketClient
 from package.camera_server.constants import Constants, Messages
@@ -30,80 +30,6 @@ def cut_polygon_from_image(image: Image.Image, polygon: list[list[int]]) -> Imag
     xs, ys = zip(*polygon)
     bbox = (min(xs), min(ys), max(xs), max(ys))
     return red_zone.crop(bbox)
-
-
-def _blobs(prev: Image.Image, curr: Image.Image, noise_floor: int = 8, blur_radius: int = 2):
-
-    w, h = curr.size
-    g1 = prev.convert("L").filter(ImageFilter.BoxBlur(blur_radius))
-    g2 = curr.convert("L").filter(ImageFilter.BoxBlur(blur_radius))
-    m1, m2 = g1.tobytes(), g2.tobytes()
-
-    mask = [1 if abs(a - b) > noise_floor else 0 for a, b in zip(m1, m2)]
-    visited = [0] * len(mask)
-    stride = w
-
-    for i, moved in enumerate(mask):
-        if not moved or visited[i]:
-            continue
-
-        area     = 0
-        min_x, min_y = w, h
-        max_x, max_y = -1, -1
-        stack = deque([i])
-
-        while stack:
-            idx = stack.pop()
-            if visited[idx]:
-                continue
-            visited[idx] = 1
-            if not mask[idx]:
-                continue
-
-            area += 1
-            y, x = divmod(idx, stride)
-            if x < min_x: min_x = x
-            if x > max_x: max_x = x
-            if y < min_y: min_y = y
-            if y > max_y: max_y = y
-
-            if x > 0: stack.append(idx - 1)
-            if x < w - 1: stack.append(idx + 1)
-            if y > 0: stack.append(idx - w)
-            if y < h - 1: stack.append(idx + w)
-
-        bbox_area = (max_x - min_x + 1) * (max_y - min_y + 1)
-        yield area, bbox_area
-
-def has_motion(prev: Image.Image, curr: Image.Image) -> bool:
-
-    w, h = curr.size
-    roi_px = w * h
-    pct_thresh = Constants.RED_ZONE_SIMILARITY_THRESHOLD
-    px_needed = math.ceil(roi_px * pct_thresh / 100)
-
-    min_blob_px = 10
-    total_changed = 0
-
-    for area, bbox_area in _blobs(prev, curr):
-        if area < min_blob_px:
-            continue
-
-        if area >= px_needed:
-            score = (area * 100) / roi_px
-            return True, score
-
-        if bbox_area >= px_needed:
-            score = (bbox_area * 100) / roi_px
-            return True, score
-
-        total_changed += area
-        if total_changed >= px_needed:
-            score = (total_changed * 100) / roi_px
-            return True, score
-
-    score = (total_changed * 100) / roi_px
-    return False, score
 
 class CameraServer:
     def __init__(self, callbacks: dict, logger=DefaultLogger()):
@@ -317,7 +243,9 @@ class CameraServer:
 
     def __on_camera_disconnect(self, camera_cli):
         camera = self.__get_camera_by_ip(camera_cli.addr[0])
-
+        if camera is None:
+            self.logger.error(f"Camera {camera_cli.addr[0]} not found in connected cameras")
+            return
         if camera.mac in self.last_frame_update_time: del self.last_frame_update_time[camera.mac]
         if camera.mac in self.last_redzones: del self.last_redzones[camera.mac]
         
@@ -347,32 +275,35 @@ class CameraServer:
 
     def __handle_frame_queue(self):
         while True:
-            camera, frame = self.frame_queue.get()
-            if camera is None or frame is None:
-                continue
+            try:
+                camera, frame = self.frame_queue.get()
+                if camera is None or frame is None:
+                    continue
 
-            if camera.mac not in self.connected_cameras: continue
-            
-            image = Image.open(io.BytesIO(frame))
-            polygon = camera.red_zone
-            if polygon is None or len(polygon) < 3: continue
-            red_zone_cut = cut_polygon_from_image(image, polygon)
+                if camera.mac not in self.connected_cameras: continue
+                
+                image = Image.open(io.BytesIO(frame))
+                polygon = camera.red_zone
+                if polygon is None or len(polygon) < 3: continue
+                red_zone_cut = cut_polygon_from_image(image, polygon)
 
-            triggered = False
+                triggered = False
 
-            if camera.mac in self.last_redzones:
-                motion, score = has_motion(self.last_redzones[camera.mac][0][0], red_zone_cut)
-                if motion: triggered = True
-            else:
-                self.last_redzones[camera.mac] = [[], 0]
+                if camera.mac in self.last_redzones and len(self.last_redzones[camera.mac][0]) >= Constants.FRAMES_BETWEEN_COMPARISONS:
+                    score = motion_score(self.last_redzones[camera.mac][0][0], red_zone_cut)
+                    if score >= Constants.RED_ZONE_SIMILARITY_THRESHOLD: triggered = True
+                elif camera.mac not in self.last_redzones:
+                    self.last_redzones[camera.mac] = [[], 0]
+                
+                if not triggered: self.last_redzones[camera.mac][0].append(red_zone_cut)
+                if len(self.last_redzones[camera.mac][0]) > Constants.FRAMES_BETWEEN_COMPARISONS:
+                    self.last_redzones[camera.mac][0].pop(0)
 
-            if not triggered: self.last_redzones[camera.mac][0].append(red_zone_cut)
-            if len(self.last_redzones[camera.mac][0]) > Constants.FRAMES_BETWEEN_COMPARISONS:
-                self.last_redzones[camera.mac][0].pop(0)
-
-            if triggered:
-                self.callbacks["on_red_zone_trigger"](camera.mac, frame)
-
+                if triggered:
+                    del self.last_redzones[camera.mac]
+                    self.callbacks["on_red_zone_trigger"](camera.mac, frame)
+            except Exception as e:
+                pass
 
     def __handle_frame(self, camera_cli, fields):
         frame = constants.Options.MESSAGE_SEPARATOR.join(fields[1:])

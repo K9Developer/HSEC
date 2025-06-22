@@ -15,7 +15,6 @@ import base64
 import hashlib
 from PIL import Image
 import qrcode
-
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
 # TODO: MULTIPLE USERS NEED TO WORK MEANING IN SERVER_CAMERA IT NEEDS TO HAVE A LIST OF STREAMING CAMERAS
 # TODO: JUST MAKE A BETTER DESIGN OF THE SERVER HERE AND FIX IN CAMERA SERVER NOT MULTIPLE USER FUNCTIONALITY
@@ -494,10 +493,6 @@ class ClientHandler:
         self.logger.info(f"Server code: {server_code}")
         print(server_code_qr)
         self.running = True
-
-        # ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        # ssl_ctx.load_cert_chain(certfile="./package/client_handler_server/certs/cert.pem", keyfile="./package/client_handler_server/certs/privkey.pem")
-        # self.logger.info("SSL context created")
 
         async with serve(self.handle_client, self.host, self.port) as server:
             self.logger.info(f"Server started on {self.host}:{self.port}")

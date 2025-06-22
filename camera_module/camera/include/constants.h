@@ -46,3 +46,4 @@
 
 // Other pins
 #define BOOT_PIN 0
+#define PIN__RGB_LED 21
