@@ -1,3 +1,6 @@
+#ifndef NETWORKMANAGER_H
+#define NETWORKMANAGER_H
+
 #include <string>
 #include <SPI.h>
 #include <Ethernet.h>
@@ -77,3 +80,4 @@ public:
         return broadcast.toString().c_str();
     }
 };
+#endif /* NETWORKMANAGER_H */

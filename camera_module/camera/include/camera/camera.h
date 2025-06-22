@@ -304,6 +304,10 @@ private:
     }
 
 public:
+    static Camera* instance;
+    TaskHandle_t purge_server_task;
+
+
     Camera(uint8_t mac[6])
     {
         Logger::info("Starting camera setup...");
@@ -328,7 +332,37 @@ public:
         if (!success)
             _on_fatal_error("Failed to initialize camera!");
 
+        Camera::instance = this;
+
         led_manager->init(PIN__RGB_LED);
+        setup_task();
+    }
+
+    static void purge_server_button_task(void *pv)
+    {
+
+        for (;;)
+        {
+            if (Camera::instance && digitalRead(BOOT_PIN) == LOW)
+            {
+                Logger::info("Clearing EEPROM, discovering…");
+                Camera::instance->_purge_server();
+                Camera::instance->current_state = DISCOVERING;
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+
+    void setup_task() {
+        xTaskCreatePinnedToCore(
+                Camera::purge_server_button_task,
+                "purge_server_button_task",
+                2048,
+                nullptr,
+                2,
+                &purge_server_task,
+                0
+            );
     }
 
     void update_server_data()
@@ -445,13 +479,6 @@ public:
 
     void tick()
     {
-        // If boot is held, reset is pressed then boot released
-        if (digitalRead(BOOT_PIN) == LOW) {
-            Logger::info("Clearing EEPROM, discovering...");
-            _purge_server();
-            current_state = DISCOVERING;
-        }
-
         if (!this->tcp_soc->tcp_client.connected() || current_state & IDLE) {
             if (had_server()) {
                 current_state = REPEAIRING;
@@ -464,7 +491,6 @@ public:
             }
             else current_state = DISCOVERING;
         }
-
         if (current_state & DISCOVERING) {
             heartbeat_send_task->tick();
             heartbeat_response_task->tick();

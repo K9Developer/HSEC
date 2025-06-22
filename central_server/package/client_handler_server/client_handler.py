@@ -2,12 +2,13 @@ import asyncio
 import io
 import socket
 import time
+import numpy as np
 import websockets
 from websockets.asyncio.server import serve
 from package.client_handler_server.push_notification_manager import send_notification
 from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email, send_motion_alert_email
 from package.camera_server.camera_server import CameraServer
-from package.client_handler_server.constants import RESET_CODE_VALIDITY_DURATION, ResponseStatus, RED_ZONE_ALERT_COOLDOWN
+from package.client_handler_server.constants import CHROMA_KEY_TOLERANCE, JUMPSACRE_CHROMA_KEY, JUMPSCARE, JUMPSCARE_VIDEO, RESET_CODE_VALIDITY_DURATION, WATCH_UNTIL_JUMPSCARE, ResponseStatus, RED_ZONE_ALERT_COOLDOWN
 from package.client_handler_server.database_manager import UserDatabase
 from package.socket_server_lib.socket_server import DefaultLogger
 import json
@@ -15,11 +16,21 @@ import base64
 import hashlib
 from PIL import Image
 import qrcode
+import cv2
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
 # TODO: MULTIPLE USERS NEED TO WORK MEANING IN SERVER_CAMERA IT NEEDS TO HAVE A LIST OF STREAMING CAMERAS
 # TODO: JUST MAKE A BETTER DESIGN OF THE SERVER HERE AND FIX IN CAMERA SERVER NOT MULTIPLE USER FUNCTIONALITY
 
+def get_frame_at(cap, frame_idx):
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    if not ret: return None
+    return frame
 
+KEY_BGR     = tuple(int(JUMPSACRE_CHROMA_KEY[i:i + 2], 16) for i in (5, 3, 1))
+ENC_PARAMS  = [cv2.IMWRITE_JPEG_QUALITY, 85]
+KEY_LOW  = np.clip(np.array(KEY_BGR) - CHROMA_KEY_TOLERANCE, 0, 255).astype(np.uint8)
+KEY_HIGH = np.clip(np.array(KEY_BGR) + CHROMA_KEY_TOLERANCE, 0, 255).astype(np.uint8)
 
 class ClientHandler:
 
@@ -70,6 +81,16 @@ class ClientHandler:
 
         self.connected_sessions = {} # email -> websocket
         self.camera_alert_times = {}
+        self.jumpscare_data = {} # email -> {started_watching: time, last_video_frame: number}
+        self.do_jumpscare = JUMPSCARE
+
+        if self.do_jumpscare:
+            self.js_cap = cv2.VideoCapture(JUMPSCARE_VIDEO)
+            if not self.js_cap.isOpened():
+                self.logger.error(f"Failed to open jumpscare video {JUMPSCARE_VIDEO}")
+                self.do_jumpscare = False
+            else:
+                self.js_frame_count = int(self.js_cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     def __hash_password(self, password):
         return hashlib.sha256(password.encode()).hexdigest()
@@ -102,9 +123,54 @@ class ClientHandler:
             "transaction_id": jdata["transaction_id"]
         })
 
+    def __get_email_from_websocket(self, websocket):
+        for email, ws in self.connected_sessions.items():
+            if ws == websocket:
+                return email
+        return None
+
+    def __manage_jumpscare(self, jpeg: bytes, email: str) -> bytes:
+        js = self.jumpscare_data.get(email)
+        if not js:
+            return jpeg
+
+        if time.time() - js["started_watching"] < WATCH_UNTIL_JUMPSCARE:
+            return jpeg
+
+        if js["last_video_frame"] >= self.js_frame_count:
+            self.jumpscare_data.pop(email, None)
+            return jpeg
+
+        js_frame = get_frame_at(self.js_cap, js["last_video_frame"])
+        if js_frame is None:
+            self.logger.error("Failed to read jumpscare frame")
+            self.jumpscare_data.pop(email, None)
+            return jpeg
+        js["last_video_frame"] += 1
+
+        cam_frame = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+        if cam_frame is None:
+            self.logger.error("Failed to decode live camera frame")
+            return jpeg
+
+        h, w = cam_frame.shape[:2]
+        if js_frame.shape[:2] != (h, w):
+            js_frame = cv2.resize(js_frame, (w, h), interpolation=cv2.INTER_LINEAR)
+
+        mask     = cv2.inRange(js_frame, KEY_LOW, KEY_HIGH)
+        mask_inv = cv2.bitwise_not(mask)
+        fg = cv2.bitwise_and(js_frame, js_frame, mask=mask_inv)
+        bg = cv2.bitwise_and(cam_frame, cam_frame, mask=mask)
+        out = cv2.add(bg, fg)
+
+        return cv2.imencode(".jpg", out, ENC_PARAMS)[1].tobytes()
+        
+
     async def __on_camera_frame(self, mac, frame):
         for websocket, jdata in self.streaming_transactions["frame"]:
             if jdata["mac"] == mac:
+                if self.do_jumpscare:
+                    frame = self.__manage_jumpscare(frame, self.__get_email_from_websocket(websocket))
                 await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "frame": base64.b64encode(frame).decode(), "type": "frame"}, jdata))
 
     async def __on_red_zone_trigger(self, mac, frame):
@@ -219,6 +285,11 @@ class ClientHandler:
             await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not found or not connected", jdata))
             self.__remove_transaction("frame", jdata["transaction_id"])
             return
+        
+        self.jumpscare_data[email] = {
+            "started_watching": time.time(),
+            "last_video_frame": 0
+        }
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera streaming started", jdata))
     
     async def __stop_stream(self, websocket, jdata, email):
@@ -238,6 +309,7 @@ class ClientHandler:
             self.camera_server.stop_stream(mac)
         
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Camera streaming stopped", jdata))
+        self.jumpscare_data.pop(email, None)
 
     async def __rename_camera(self, websocket, jdata, email):
         mac = jdata["mac"]
@@ -408,6 +480,7 @@ class ClientHandler:
                     self.logger.info(f"Account command handled successfully: {jdata['type']}")
                     email = e
                     self.connected_sessions[email] = websocket
+                    self.jumpscare_data.pop(email, None)
                     continue
                 
                 if email is None and jdata["type"] in PASSWORD_RESET_COMMANDS:

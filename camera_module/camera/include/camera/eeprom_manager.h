@@ -18,7 +18,7 @@ struct ServerData {
 };
 
 
-void write_data_to_eeprom(const ServerData& data) {
+inline void write_data_to_eeprom(const ServerData& data) {
     int curr_ptr = 0;
 
     EEPROM.put(curr_ptr, EEPROM_MAGIC);
@@ -29,7 +29,7 @@ void write_data_to_eeprom(const ServerData& data) {
     EEPROM.commit();
 }
 
-bool has_eeprom_data() {
+inline bool has_eeprom_data() {
 
     uint32_t magic;
     EEPROM.get(0, magic);
@@ -37,7 +37,7 @@ bool has_eeprom_data() {
     return magic == EEPROM_MAGIC;
 }
 
-ServerData read_data_from_eeprom() {
+inline ServerData read_data_from_eeprom() {
 
     ServerData data;
     EEPROM.get(sizeof(EEPROM_MAGIC), data);
@@ -45,7 +45,7 @@ ServerData read_data_from_eeprom() {
     return data;
 }
 
-void clear_eeprom() {
+inline void clear_eeprom() {
 
     for (int i = 0; i < sizeof(ServerData) + sizeof(EEPROM_MAGIC); ++i) {
         EEPROM.write(i, 0xFF); // or 0x00 depending on your convention
