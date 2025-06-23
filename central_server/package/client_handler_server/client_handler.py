@@ -15,7 +15,6 @@ from package.socket_server_lib.socket_server import DefaultLogger
 import json
 import base64
 import hashlib
-from PIL import Image
 import qrcode
 import cv2
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
