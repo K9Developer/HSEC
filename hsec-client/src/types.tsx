@@ -41,6 +41,14 @@ export interface GetCamerasResponse extends GenericResponse {
     categories: string[];
 }
 
+export interface PlaybackChunkResponse extends GenericResponse {
+    camera_id: string;
+    time_started: Date;
+    video_data: string;
+    duration: number;
+    size: [number, number]
+}
+
 export interface GetNotificationsResponse extends GenericResponse {
     notifications: HsecNotification[];
 }

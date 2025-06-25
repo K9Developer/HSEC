@@ -13,6 +13,7 @@ import threading
 from Cryptodome.Util.Padding import pad, unpad
 from Cryptodome.Cipher import AES
 from queue import Queue
+from package.camera_server.playback_manager import PlaybackManager
 
 def filter_detections(detections, red_zone, alert_categories):
     red_poly = np.array(red_zone, dtype=np.int32)
@@ -50,7 +51,6 @@ class CameraServer:
             protocol=constants.ServerProtocol.UDP,
             logger=logger,
         )
-        self.camera_discover_server.start(no_loop=True)
 
         # This server registers new cameras and handles camera data
         self.camera_server = SocketServer(
@@ -59,7 +59,6 @@ class CameraServer:
             protocol=constants.ServerProtocol.TCP,
             logger=logger,
         )
-        self.camera_server.start()
 
         self.callbacks = callbacks
         self.discovering_cameras = True
@@ -69,6 +68,7 @@ class CameraServer:
 
         self.frame_queue = Queue()
         self.last_redzones = {} # {mac: (hash, frames_passed)}
+        self.timelapse_info = {} # {mac: (start_time, frames_passed)}
 
         self.db = CameraDatabase()
 
@@ -96,6 +96,10 @@ class CameraServer:
             target=self.__handle_frame_queue,
             daemon=True,
         ).start()
+
+        self.camera_discover_server.start(no_loop=True)
+        self.camera_server.start()
+
 
     @staticmethod
     def __does_match_pattern(data, pattern):
@@ -261,6 +265,7 @@ class CameraServer:
             return
         
         if camera.mac in self.connected_cameras: del self.connected_cameras[camera.mac]
+        self.callbacks["on_camera_disconnected"](camera_cli.addr, camera.mac)
 
     def __handle_bad_code(self, camera_cli, fields):
         if len(fields) != 2:
@@ -330,6 +335,9 @@ class CameraServer:
 
         if camera.red_zone is not None and check_red_zone:
             self.frame_queue.put((camera, frame))
+
+        threading.Thread(target=PlaybackManager.add_frame, args=(camera.mac, frame)).start()
+
         if self.last_frame_update_time.get(camera.mac) and time.time() - self.last_frame_update_time.get(camera.mac, 0) < Constants.STATIC_CAMERA_FRAME_UPDATE_INTERVAL:
             self.logger.debug(f"Skipping frame update for camera {camera.mac} due to rate limiting")
             return

@@ -21,6 +21,7 @@ import { IconContext } from "react-icons";
 import { MdKeyboardAlt } from "react-icons/md";
 import AnimatedQRScanner from "./components/AnimatedQRScanner.tsx";
 import { Scanner } from '@yudiel/react-qr-scanner'; // gotta have this import for the qr to work even tho thats not used directly (FOR SOME FUCKIN REASON)
+import PlaybackPage from "./pages/PlaybackPage.tsx";
 
 const App = () => {
     const [user, setUser] = useState<null | User>(null);
@@ -115,7 +116,7 @@ const App = () => {
             console.error("Failed to connect to server:", err);
             showPopup("Failed to connect to server. Please check the server code and try again.", "error");
             setConnectingToServer(false);
-            localStorage.removeItem("server_code");
+            // localStorage.removeItem("server_code");
             setCurrServerCode("");
             return false;
         }
@@ -189,7 +190,7 @@ const App = () => {
                                     console.error("Failed to connect to server:", err);
                                     showPopup("Failed to connect to server. Please check the server code and try again.", "error");
                                     setConnectingToServer(false);
-                                    localStorage.removeItem("server_code");
+                                    // localStorage.removeItem("server_code");
                                 })
                         }}
                     />
@@ -214,6 +215,7 @@ const App = () => {
                         <Route path="discover" element={<DiscoveryPage />} />
                         <Route path="account/forgot-pass" element={<ForgotPasswordPage />} />
                         <Route path="camera/:cameraId" element={<CameraViewer />} />
+                        <Route path="playback/:cameraId" element={<PlaybackPage />} />
                         <Route path="*" element={<div>404 Not Found</div>} />
                     </Routes>
                 </BrowserRouter>

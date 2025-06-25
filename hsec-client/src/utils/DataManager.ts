@@ -1,11 +1,11 @@
 // GetCameras, GetFrame, Etc.
 // Include caching and GetCameras will take a bool whether to override the cache
 
-import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse } from "../types";
+import type { GenericResponse, GetCamerasResponse, GetNotificationsResponse, PlaybackChunkResponse } from "../types";
 import showPopup from "./PopupManager";
 
 export type DataEvent = "frame" | "camera_discovered" | "red_zone_trigger"
-export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token" | "update_alert_categories";
+export type QueryType = "discover_cameras" | "stop_discovery" | "get_cameras" | "stream_camera" | "stop_stream" | "rename_camera" | "unpair_camera" | "pair_camera" | "login_pass" | "signup" | "login_session" | "request_password_reset" | "reset_password" | "share_camera" | "save_polygon" | "get_notifications" | "send_fcm_token" | "update_alert_categories" | "get_playback_chunk" | "get_playback_range";
 
 const SERVER_PORT = 34531
 
@@ -88,7 +88,7 @@ export class DataManager {
         const response = JSON.parse(event.data);
         if (response.transaction_id !== undefined) {
             if (DataManager.eventListeners[response.data?.type]) {
-                // console.log("Event listener found for type:", response.data?.type);
+                response.data.success = response.status === "success";
                 DataManager.eventListeners[response.data?.type](response.data);
             }
             const query = DataManager.awaitingResponses.find(r => r.transaction_id === response.transaction_id);
@@ -143,6 +143,47 @@ export class DataManager {
             DataManager.sendRequest("update_alert_categories", { mac, categories }, (data) => {
                 if (data.error) resolve({ success: false, info: data.error });
                 else resolve({ success: data.status === "success", info: data.data || "" });
+            });
+        })
+    }
+
+    static async getPlaybackChunk(mac: string, start: Date, end: Date): Promise<PlaybackChunkResponse> {
+        return new Promise((resolve, _) => {
+            if (!DataManager.isConnected()) {
+                resolve({ success: false, info: "Not connected to server", camera_id: mac, time_started: start, video_data: "", duration: 0, size: [0, 0] });
+                return;
+            }
+
+            DataManager.sendRequest("get_playback_chunk", { mac, start_date: start.toISOString(), end_date: end.toISOString() }, (data) => {
+                if (data.error) resolve({ success: false, info: data.error, camera_id: mac, time_started: start, video_data: "", duration: 0, size: [0, 0] });
+                else resolve({
+                    success: data.status === "success",
+                    camera_id: mac,
+                    time_started: new Date(data.data.time_started),
+                    video_data: data.data.video_data || "",
+                    duration: data.data.duration || 0,
+                    size: data.data.size || [0, 0],
+                    info: data.data.info || ""
+                });
+            });
+        })
+    }
+
+    static async getPlaybackRange(mac: string): Promise<{ success: boolean; info: string; start_date: Date; end_date: Date }> {
+        return new Promise((resolve, _) => {
+            if (!DataManager.isConnected()) {
+                resolve({ success: false, info: "Not connected to server", start_date: new Date(0), end_date: new Date(0) });
+                return;
+            }
+
+            DataManager.sendRequest("get_playback_range", { mac }, (data) => {
+                if (data.error) resolve({ success: false, info: data.error, start_date: new Date(0), end_date: new Date(0) });
+                else resolve({
+                    success: data.status === "success",
+                    info: data.data.info || "",
+                    start_date: new Date(data.data.start_date),
+                    end_date: new Date(data.data.end_date)
+                });
             });
         })
     }
@@ -210,7 +251,7 @@ export class DataManager {
             }
 
             console.log("Starting camera stream for MAC:", mac);
-            const transaction_id = DataManager.sendRequest("stream_camera", {mac}, (data) => {
+            const transaction_id = DataManager.sendRequest("stream_camera", { mac }, (data) => {
                 if (data.error) resolve({ success: false, info: data.error });
                 else resolve({ success: data.status === "success", info: data.data || "" });
             });
@@ -232,7 +273,7 @@ export class DataManager {
                 return;
             }
 
-            DataManager.sendRequest("stop_stream", {mac}, (data) => {
+            DataManager.sendRequest("stop_stream", { mac }, (data) => {
                 if (data.error) resolve({ success: false, info: data.error });
                 else resolve({ success: data.status === "success", info: data.data || "" });
             }, transaction_id);
@@ -333,7 +374,7 @@ export class DataManager {
         delete DataManager.eventListeners[event];
     }
 
-    
+
 
     // -----
     static async passLogin(email: string, password: string): Promise<{ token: string; success: boolean; reason: string }> {
@@ -387,7 +428,7 @@ export class DataManager {
 
             DataManager.sendRequest("request_password_reset", { email }, (data) => {
                 if (data.error) resolve({ success: false, reason: data.error });
-                else resolve({ success: data.status === "success", reason: data.data.info || "", timeLeft: data.data.time_left || 0});
+                else resolve({ success: data.status === "success", reason: data.data.info || "", timeLeft: data.data.time_left || 0 });
             })
         });
     }
@@ -415,7 +456,7 @@ export class DataManager {
 
             DataManager.sendRequest("send_fcm_token", { token }, (data) => {
                 if (data.error) resolve({ success: false, info: data.data });
-                else resolve({ success: data.status === "success", info: data.data});
+                else resolve({ success: data.status === "success", info: data.data });
             })
         });
     }

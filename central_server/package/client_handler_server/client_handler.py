@@ -1,11 +1,13 @@
 import asyncio
 import io
+import math
 import socket
 import time
 import numpy as np
 import websockets
 from websockets.asyncio.server import serve
-from package.camera_server.constants import CATEGORY_TO_CLASS
+from package.camera_server.playback_manager import PlaybackManager
+from package.camera_server.constants import CATEGORY_TO_CLASS, Constants
 from package.client_handler_server.push_notification_manager import send_notification
 from package.client_handler_server.email_manager import send_reset_password_email, send_camera_share_email, send_motion_alert_email
 from package.camera_server.camera_server import CameraServer
@@ -17,6 +19,7 @@ import base64
 import hashlib
 import qrcode
 import cv2
+import datetime
 # TODO: current_transaction_id_data_stream NEEDS TO BE PER USER
 # TODO: MULTIPLE USERS NEED TO WORK MEANING IN SERVER_CAMERA IT NEEDS TO HAVE A LIST OF STREAMING CAMERAS
 # TODO: JUST MAKE A BETTER DESIGN OF THE SERVER HERE AND FIX IN CAMERA SERVER NOT MULTIPLE USER FUNCTIONALITY
@@ -47,6 +50,7 @@ class ClientHandler:
             "on_camera_repair_failed": lambda *a: self.__call_task(self.__on_camera_pairing_failed, *a),
             "on_camera_frame": lambda *a: self.__call_task(self.__on_camera_frame, *a),
             "on_red_zone_trigger": lambda *a: self.__call_task(self.__on_red_zone_trigger, *a),
+            "on_camera_disconnected": lambda *a: self.__call_task(self.__on_camera_disconnect, *a),
         })
         
         self.CALLBACK_TABLE = {
@@ -59,6 +63,8 @@ class ClientHandler:
             "unpair_camera": self.__unpair_camera,
             "pair_camera": self.__pair_camera,
             "update_alert_categories": self.__update_alert_categories,
+            "get_playback_chunk": self.__get_playback_chunk,
+            "get_playback_range": self.__get_playback_range,
 
             "login_session": self.__handle_session_login,
             "login_pass": self.__handle_password_login,
@@ -174,6 +180,19 @@ class ClientHandler:
                     frame = self.__manage_jumpscare(frame, self.__get_email_from_websocket(websocket))
                 await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {"mac": mac, "frame": base64.b64encode(frame).decode(), "type": "frame"}, jdata))
 
+    async def __on_camera_disconnect(self, addr, mac):
+        self.logger.info(f"Camera {mac} disconnected")
+        for websocket, jdata in self.streaming_transactions["frame"]:
+            if jdata["mac"] == mac:
+                await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, {"info": "Camera disconnected", "type": "frame"}, jdata))
+                self.__remove_transaction("frame", jdata["transaction_id"])
+        
+        if mac in self.camera_alert_times:
+            del self.camera_alert_times[mac]
+        
+        if mac in self.jumpscare_data:
+            del self.jumpscare_data[mac]
+
     async def __on_red_zone_trigger(self, mac, frame, detections):
         if mac in self.camera_alert_times and time.time()-self.camera_alert_times[mac] < RED_ZONE_ALERT_COOLDOWN:
             return
@@ -252,7 +271,7 @@ class ClientHandler:
             return
         
         categories = jdata["categories"]
-        if not isinstance(categories, list) or len(categories) == 0:
+        if not isinstance(categories, list):
             await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Invalid categories", jdata))
             return
         
@@ -260,6 +279,51 @@ class ClientHandler:
         self.camera_server.connected_cameras[mac].alert_categories = categories
         self.logger.info(f"Updated alert categories for camera {mac}: {categories}")
         await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, "Alert categories updated", jdata))
+
+    async def __get_playback_chunk(self, websocket, jdata, email):
+        mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
+        
+        start_date = datetime.datetime.fromisoformat(jdata["start_date"])
+        end_date = datetime.datetime.fromisoformat(jdata["end_date"])
+        delta_sec = (end_date - start_date).total_seconds()
+        chunks = math.ceil(delta_sec / Constants.TIMELAPSE_CHUNK_DURATION)
+        if chunks <= 0:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Invalid time range", jdata))
+            return
+        
+        merged_chunk = PlaybackManager.get_chunks_merged(mac, start_date, chunks)
+        if merged_chunk is None:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "No chunks found", jdata))
+            return
+        
+        self.logger.info(f"Getting {chunks} chunks for camera {mac} from {start_date} to {end_date}")
+        
+        merged_chunk["video_data"] = base64.b64encode(merged_chunk["video_data"]).decode()
+        merged_chunk["time_started"] = merged_chunk["time_started"].isoformat()
+
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, merged_chunk, jdata))
+
+    async def __get_playback_range(self, websocket, jdata, email):
+        mac = jdata["mac"]
+        if mac not in self.db.get_linked_cameras(email):
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "Camera not linked", jdata))
+            return
+        
+        start_date, end_date = PlaybackManager.get_recorded_time_range(mac)
+        if start_date is None or end_date is None:
+            await self.__send_websocket(websocket, self.__get_response(ResponseStatus.ERROR, "No recorded data found", jdata))
+            return
+
+        start_date = start_date.isoformat()
+        end_date = end_date.isoformat()
+        self.logger.info(f"Playback range for camera {mac}: {start_date} to {end_date}")
+        await self.__send_websocket(websocket, self.__get_response(ResponseStatus.SUCCESS, {
+            "start_date": start_date,
+            "end_date": end_date
+        }, jdata))
 
     async def __discover_cameras(self, websocket, jdata, _):
         if jdata["transaction_id"] in [t[1]["transaction_id"] for t in self.streaming_transactions["discover_cameras"]]:

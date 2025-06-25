@@ -6,6 +6,8 @@ if not os.path.exists("databases"):
     os.makedirs("databases")
 if not os.path.exists("certs"):
     os.makedirs("certs")
+if not os.path.exists("recordings"):
+    os.makedirs("recordings")
 
 
 client_handler = ClientHandler()

@@ -13,6 +13,7 @@ import { PiPolygonBold } from "react-icons/pi";
 import { TbPolygonOff } from "react-icons/tb";
 import showPopup from "../utils/PopupManager";
 import MultipleChoose from "../components/MultipleChoose";
+import { FaPlay } from "react-icons/fa";
 
 // Add modal with email
 
@@ -145,6 +146,12 @@ const CameraViewer = () => {
 
     const onFrame = (data: any) => {
         if (timeout) clearTimeout(timeout);
+        if (!data.success) {
+            console.error("Failed to receive frame data:", data.info);
+            showPopup(data.info, "error");
+            navigate("/");
+            return;
+        }
         const newSourceUrl = `data:image/jpeg;base64,${data.frame}`;
         if (firstFrame.current) {
             console.log("Setting initial image size from new source URL");
@@ -342,10 +349,8 @@ const CameraViewer = () => {
                             if (!camera) return;
                                 camera.alert_categories = selectedCategories;
                                 DataManager.updateAlertCategories(camera.mac, selectedCategories).then((res: any) => {
-                                    if (res.success) {
-                                        showPopup("Alert categories updated successfully!", "success");
-                                        setCamera({ ...camera });
-                                    } else showPopup("Failed to update alert categories: " + res.info, "error");
+                                    if (res.success) showPopup("Alert categories updated successfully!", "success"); 
+                                    else showPopup("Failed to update alert categories: " + res.info, "error");
                                 }).catch((err: any) => {
                                     console.error("Error updating alert categories:", err);
                                     showPopup("An error occurred while updating alert categories. Please try again later.", "error");
@@ -353,7 +358,16 @@ const CameraViewer = () => {
                         }} disabled={polygonPoints.length==0}/>
                     </div>
                 </div>
-                <div className="w-full px-2 flex flex-row gap-2">
+                <div className="flex flex-col gap-3 px-2">
+                    <Button text="Watch Playback" className="w-full" icon={FaPlay} onClick={() => {
+                        if (!camera) {
+                            showPopup("Camera not found. Please try again later.", "error");
+                            return;
+                        }
+                        navigate(`/playback/${camera.mac}`);
+                    }} />
+
+                <div className="w-full flex flex-row gap-2">
                     {/* <Button text="Share" className="w-1/2" icon={FaShareAlt} onClick={() => setShowShare(true)} /> */}
                     <Button text="Share" className="w-full" icon={FaShareAlt} onClick={() => setShowShare(true)} />
                     {recordingPolygon ? <Button text="Stop Recording" className="w-full" secondary icon={TbPolygonOff} onClick={() => {
@@ -363,6 +377,7 @@ const CameraViewer = () => {
                         setPolygonPoints([]);
                         setRecordingRedzone(true)
                     }} />}
+                </div>
                 </div>
             </div>
         </div>

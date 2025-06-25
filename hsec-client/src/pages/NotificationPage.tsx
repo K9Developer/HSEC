@@ -6,26 +6,6 @@ import NotificationCard from '../components/NotificationCard';
 import { DataManager } from '../utils/DataManager';
 import type { HsecNotification } from '../types';
 
-// const TMP = [
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",},
-//     {"type": "red_zone_trigger","title": "Red Zone Triggered","message": "Red zone triggered for camera {mac}.","mac": "00:11:22:33:44:55","timestamp": 12345,"frame": "https://images.pexels.com/photos/255379/pexels-photo-255379.jpeg?cs=srgb&dl=pexels-padrinan-255379.jpg&fm=jpg",}
-// ]
-
-
 const NotificationPage = () => {
     const { user, setUser } = useContext(UserContext);
     const [notifications, setNotifications] = React.useState<HsecNotification[]>([]);

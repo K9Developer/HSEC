@@ -9,3 +9,4 @@ serviceAccountKey.json
 certs/
 log.txt
 *.pt
+*.mp4.gz
