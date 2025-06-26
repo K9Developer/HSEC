@@ -494,10 +494,10 @@ public:
         if (current_state & DISCOVERING) {
             heartbeat_send_task->tick();
             heartbeat_response_task->tick();
-            led_manager->start_led({52, 100, 235, 100}, Effect::FADE_IN_OUT, 1000, 50, 1000);
+            led_manager->start_led({52, 100, 235, 70}, Effect::FADE_IN_OUT, 1000, 50, 1000);
         } else if (current_state & REPEAIRING) {
             repair_task->tick();
-            led_manager->start_led({201, 52, 235, 100}, Effect::FADE_IN_OUT, 1000, 50, 1000);
+            led_manager->start_led({245, 195, 47, 70}, Effect::FADE_IN_OUT, 1000, 50, 1000);
         } else if (current_state & LINKED) {
             stream_task->force_run();
             listen_task->tick();
