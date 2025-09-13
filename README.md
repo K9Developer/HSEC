@@ -107,6 +107,16 @@ More information about the custom protocol itself (that is built ontop of TCP) c
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
+## Features
+1. Linking to multiple cameras
+2. Secure communications
+3. Camera sharing
+4. Object detection in red zones set up by user
+5. Camera playback - WIP
+6. Emails and notifications for redzone detection
+7. Renaming and unlinking cameras
+8. And more!
+
 
 <!-- GETTING STARTED -->
 ## Getting Started
